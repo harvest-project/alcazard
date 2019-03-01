@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang=en>
+<head>
+    <meta charset=utf-8>
+    <!--<meta http-equiv="refresh" content="0.5">-->
+    <title>alcazard</title>
+</head>
+<body>
+
+{{ torrent_statuses_counter }}
+
+<table border="1" cellspacing="0" cellpadding="4" style="border-collapse: collapse;">
+    <thead>
+    <tr>
+        <th>Last Update</th>
+        <th>Info Hash</th>
+        <th>Name</th>
+        <th>State</th>
+        <th>Save Path</th>
+        <th>Done / Total</th>
+        <th>All time transfer</th>
+        <th>Rates</th>
+        <th>Tracker Error</th>
+    </tr>
+    </thead>
+    {% for torrent in torrent_statuses %}
+    <tr>
+        <td>{{ torrent.last_update }}</td>
+        <td>{{ torrent.info_hash }}</td>
+        <td>{{ torrent.name|truncate(40) }}</td>
+        <td>{{ torrent.state }}</td>
+        <td>{{ torrent.save_path }}</td>
+        <td>{{ torrent.progress|round(4) }}: {{ torrent.total_done }} / {{ torrent.total_wanted }}</td>
+        <td>{{ torrent.all_time_download }} / {{ torrent.all_time_upload }}</td>
+        <td>{{ torrent.download_payload_rate }} / {{ torrent.upload_payload_rate }}</td>
+        <td>{{ torrent.tracker_error }}</td>
+    </tr>
+    {% endfor %}
+</table>
+</body>
+</html>

@@ -1,0 +1,381 @@
+import asyncio
+import logging
+import time
+import traceback
+from asyncio import CancelledError
+from collections import Counter
+
+import libtorrent
+
+from clients import Manager
+from error_manager import Severity
+from libtorrent_impl import params
+from libtorrent_impl.torrent_state import LibtorrentTorrentState
+from libtorrent_impl.utils import format_libtorrent_endpoint, LibtorrentClientException
+from models import ManagedLibtorrentConfig, LibtorrentTorrent, DB
+from utils import chunks
+
+logger = logging.getLogger(__name__)
+
+
+class ManagedLibtorrent(Manager):
+    key: str = 'managed_libtorrent'
+    config_model = ManagedLibtorrentConfig
+
+    def __init__(self, orchestrator, instance_config):
+        super().__init__(orchestrator, instance_config)
+
+        self._peer_port = None
+        self._session = None
+        self._torrent_states = {}
+        # Timestamp (float) of when the last torrent updates request was posted.
+        self._last_post_updates_request = None
+        # Timestamp (float) of when the last resume data save was triggered
+        self._last_save_resume_data_request = None
+        # Set of info_hashes we're waiting to receive a resume data (failed) alert for.
+        # Used in shutdown to wait for all.
+        self._info_hashes_waiting_for_resume_data_save = set()
+        # Used to cache LibtorrentTorrent model instances that we add during startup to avoid issuing N selects
+        self._libtorrent_torrent_by_info_hash = {}
+
+    @property
+    def num_torrents(self):
+        return len(self._torrent_states)
+
+    @property
+    def peer_port(self):
+        return self._session.listen_port(),
+
+    def launch(self):
+        logger.debug('Launching {}'.format(self._name))
+
+        self._peer_port = self._orchestrator.grab_peer_port()
+        logger.debug('Received peer_port={} for {}'.format(self._peer_port, self._name))
+
+        # Reset the timer for saving fast resume data when launched, no need to do it immediately.
+        self._last_save_resume_data_request = time.time()
+
+        settings = params.get_session_settings(self._peer_port, self.config.is_dht_enabled)
+        self._session = libtorrent.session(settings)
+
+        asyncio.ensure_future(self._loop())
+        asyncio.ensure_future(self._load_initial_torrents())
+
+    async def __load_initial_torrents(self, id_batch):
+        torrents = list(LibtorrentTorrent.select().where(LibtorrentTorrent.id.in_(id_batch)))
+        for torrent in torrents:
+            self._libtorrent_torrent_by_info_hash[torrent.info_hash] = torrent
+            self._add_torrent(
+                torrent=torrent.torrent_file,
+                download_path=torrent.download_path,
+                async_add=True,
+                resume_data=torrent.resume_data,
+            )
+            # We will not need the torrent_file anymore and the resume_data will be regenerated for saving
+            torrent.torrent_file = None
+            torrent.resume_data = None
+
+    async def _load_initial_torrents(self):
+        start = time.time()
+        ids = list(LibtorrentTorrent.select(LibtorrentTorrent.id).tuples())
+        for batch in chunks(ids, 1000):
+            await self.__load_initial_torrents(batch)
+        logger.info('Completed initial torrent load in {}.'.format(time.time() - start))
+
+    async def _loop(self):
+        while True:
+            start = time.time()
+
+            try:
+                self._loop_iteration()
+                self._initialized = True
+            except CancelledError:
+                break
+            except Exception:
+                self._error_manager.add_error(
+                    severity=Severity.ERROR,
+                    key=params.ERROR_KEY_LOOP,
+                    message='Loop crashed',
+                    traceback=traceback.format_exc(),
+                )
+                logger.exception('Loop crashed')
+
+            time_taken = time.time() - start
+            if time_taken > 0.1:
+                logger.info('Libtorrent slow loop for {} took {:.3f}'.format(self._name, time_taken))
+            await asyncio.sleep(max(0, params.LOOP_INTERVAL - time_taken))
+
+    def _on_alert_torrent_finished(self, alert):
+        status = alert.handle.status()
+        info_hash = str(status.info_hash)
+        torrent_state = self._torrent_states[info_hash]
+        logger.debug('Update torrent finished for {}'.format(info_hash))
+        # Copied explanation from Deluge:
+        # Only save resume data if it was actually downloaded something. Helps
+        # on startup with big queues with lots of seeding torrents. Libtorrent
+        # emits alert_torrent_finished for them, but there seems like nothing
+        # worth really to save in resume data, we just read it up in
+        # self.load_state().
+        if status.total_payload_download:
+            self._save_torrents_resume_data([torrent_state], True)
+
+    def _on_alert_state_update(self, alert):
+        for status in alert.status:
+            info_hash = str(status.info_hash)
+            logger.debug('Update state update for {}'.format(status.info_hash))
+            torrent_state = self._torrent_states[info_hash]
+            if torrent_state.update_from_status(status):
+                self._orchestrator.on_torrent_updated(torrent_state)
+
+    def __on_resume_data_completed(self, info_hash):
+        self._info_hashes_waiting_for_resume_data_save.remove(info_hash)
+
+    def _on_alert_tracker_reply(self, alert):
+        info_hash = str(alert.handle.info_hash())
+        logger.debug('Tracker reply for {}'.format(info_hash))
+        torrent_state = self._torrent_states[info_hash]
+        if torrent_state.update_tracker_success():
+            self._orchestrator.on_torrent_updated(torrent_state)
+
+    def _on_alert_tracker_error(self, alert):
+        info_hash = str(alert.handle.info_hash())
+        logger.debug('Tracker error for {}'.format(info_hash))
+        torrent_state = self._torrent_states[info_hash]
+        if torrent_state.update_tracker_error():
+            self._orchestrator.on_torrent_updated(torrent_state)
+
+    def _on_alert_save_resume_data(self, alert):
+        info_hash = str(alert.handle.info_hash())
+        logger.debug('Received fast resume data for {}'.format(info_hash))
+        self.__on_resume_data_completed(info_hash)
+
+        torrent_state = self._torrent_states[info_hash]
+        torrent_state.db_torrent.resume_data = libtorrent.bencode(alert.resume_data)
+        torrent_state.db_torrent.save(only=(LibtorrentTorrent.resume_data,))
+        # Save memory after save, since we'll not need that at all
+        torrent_state.db_torrent.resume_data = None
+
+    def _on_alert_save_resume_data_failed(self, alert):
+        info_hash = str(alert.handle.info_hash())
+        logger.error('Received fast resume data FAILED for {}'.format(info_hash))
+        self.__on_resume_data_completed(info_hash)
+
+    def _save_torrents_resume_data(self, torrent_states, flush_disk_cache):
+        logger.info('Triggering save_resume_data for {} torrents, flush={}'.format(
+            'all' if torrent_states is None else str(len(torrent_states)),
+            flush_disk_cache,
+        ))
+        flags = libtorrent.save_resume_flags_t.flush_disk_cache if flush_disk_cache else 0
+
+        if torrent_states is None:
+            torrent_states = self._torrent_states.values()
+
+        skipped = 0
+        for torrent_state in torrent_states:
+            if torrent_state.handle.need_save_resume_data():
+                logger.debug('Requesting resume data for {}'.format(torrent_state.info_hash))
+                torrent_state.handle.save_resume_data(flags)
+                self._info_hashes_waiting_for_resume_data_save.add(torrent_state.info_hash)
+            else:
+                skipped += 1
+        logger.debug('Skipped saving resume data for {} torrents - not needed.'.format(skipped))
+
+    def _on_alert_listen_succeeded(self, alert):
+        key, _ = format_libtorrent_endpoint(alert.endpoint)
+        self._error_manager.clear_error(key, convert_errors_to_warnings=False)
+
+    def _on_alert_listen_failed(self, alert):
+        key, readable_name = format_libtorrent_endpoint(alert.endpoint)
+        self._error_manager.add_error(Severity.ERROR, key, 'Failed to listen on {}'.format(readable_name))
+
+    def _run_periodic_tasks(self):
+        cur_time = time.time()
+        should_post_updates = (
+                not self._last_post_updates_request or
+                cur_time - self._last_post_updates_request > params.POST_UPDATES_INTERVAL
+        )
+        if should_post_updates:
+            logger.debug('Calling post_torrent_updates')
+            self._session.post_torrent_updates()
+            self._last_post_updates_request = cur_time
+
+        should_save_resume_data = (
+                not self._last_save_resume_data_request or
+                cur_time - self._last_save_resume_data_request > params.SAVE_RESUME_DATA_INTERVAL
+        )
+        if should_save_resume_data:
+            self._save_torrents_resume_data(None, False)
+            self._last_save_resume_data_request = cur_time
+
+    def __torrent_handle_added(self, handle, *, torrent_file=None, download_path=None):
+        """
+
+        :param info_hash: info_hash of the added torrent
+        :param handle: libtorrent.torrent_handle of the added torrent
+        :param torrent_file: Only passed during the initial add, so that the LibtorrenTorrent can be created
+        :return:
+        """
+        info_hash = str(handle.info_hash())
+        db_torrent = self._libtorrent_torrent_by_info_hash.pop(info_hash, None)
+        torrent_state = LibtorrentTorrentState(
+            manager=self,
+            handle=handle,
+            torrent_file=torrent_file,
+            download_path=download_path,
+            db_torrent=db_torrent,
+        )
+        self._torrent_states[torrent_state.info_hash] = torrent_state
+        self._orchestrator.on_torrent_added(torrent_state)
+        return torrent_state
+
+    def _on_alert_torrent_added(self, alert):
+        handle = alert.handle
+        info_hash = str(handle.info_hash())
+        logger.debug('Received torrent_added for {}'.format(info_hash))
+        if info_hash not in self._torrent_states:
+            self.__torrent_handle_added(handle)
+
+    def _on_alert_torrent_removed(self, alert):
+        info_hash = str(alert.info_hash)
+        torrent_state = self._torrent_states[info_hash]
+        torrent_state.delete()
+        del self._torrent_states[info_hash]
+        self._orchestrator.on_torrent_removed(self, info_hash)
+
+    def _process_alerts(self):
+        alerts = self._session.pop_alerts()
+        if not len(alerts):
+            return
+        logging.error('Received {} alerts'.format(len(alerts)))
+        for alerts_batch in chunks(alerts, 5000):
+            logging.debug('Processing batch of {} alerts'.format(len(alerts_batch)))
+            with DB.atomic():
+                self.__process_alerts(alerts_batch)
+
+    def __process_alerts(self, alerts):
+        for a in alerts:
+            try:
+                # print(type(a))
+                # print(a.what())
+                # print(a.message())
+                # print()
+
+                if isinstance(a, libtorrent.state_update_alert):
+                    self._on_alert_state_update(a)
+                elif isinstance(a, libtorrent.torrent_finished_alert):
+                    self._on_alert_torrent_finished(a)
+                elif isinstance(a, libtorrent.tracker_reply_alert):
+                    self._on_alert_tracker_reply(a)
+                elif isinstance(a, libtorrent.tracker_error_alert):
+                    self._on_alert_tracker_error(a)
+                elif isinstance(a, libtorrent.save_resume_data_alert):
+                    self._on_alert_save_resume_data(a)
+                elif isinstance(a, libtorrent.torrent_added_alert):
+                    self._on_alert_torrent_added(a)
+                elif isinstance(a, libtorrent.listen_succeeded_alert):
+                    self._on_alert_listen_succeeded(a)
+                elif isinstance(a, libtorrent.listen_failed_alert):
+                    self._on_alert_listen_failed(a)
+                elif isinstance(a, libtorrent.torrent_removed_alert):
+                    self._on_alert_torrent_removed(a)
+            except Exception:
+                alert_type_name = type(a).__name__
+                message = 'Error processing alert of type {}'.format(alert_type_name)
+                self._error_manager.add_error(
+                    Severity.ERROR,
+                    params.ERROR_KEY_ALERT_PROCESSING.format(alert_type_name),
+                    message,
+                    traceback.format_exc(),
+                )
+                logger.exception(message)
+
+    def _loop_iteration(self):
+        if not self._session:
+            raise LibtorrentClientException('Not launched yet')
+
+        with DB.atomic():
+            try:
+                self._run_periodic_tasks()
+            except Exception:
+                self._error_manager.add_error(
+                    Severity.ERROR,
+                    params.ERROR_KEY_PERIODIC_TASKS,
+                    'Error running periodic tasks',
+                    traceback.format_exc(),
+                )
+                logger.exception('Failed to run periodic tasks')
+
+        self._process_alerts()
+
+    def shutdown(self):
+        start = time.time()
+        logger.debug('Initiating libtorrent shutdown')
+        self._session.pause()
+        logger.debug('Paused session in {}.'.format(time.time() - start))
+
+        start = time.time()
+        self._save_torrents_resume_data(None, True)
+        logger.debug('Waiting for save resume data to complete. Running alert poll loop.')
+        wait_start = time.time()
+        while self._info_hashes_waiting_for_resume_data_save:
+            self._process_alerts()
+            time.sleep(params.LOOP_INTERVAL)
+            if time.time() - wait_start > params.SHUTDOWN_TIMEOUT:
+                raise LibtorrentClientException('Shutdown timeout reached.')
+        logger.debug('Saving data completed in {}, session stopped.'.format(time.time() - start))
+        self._session = None
+
+    def get_info_dict(self):
+        data = super().get_info_dict()
+        data.update({
+            'state_path': self.config.state_path,
+        })
+        return data
+
+    def get_debug_dict(self):
+        data = super().get_debug_dict()
+        data.update({
+            'num_torrent_per_state': Counter([ts.state for ts in self._torrent_states.values()]),
+            'torrents_with_errors': len([None for state in self._torrent_states.values() if state.error]),
+            'torrent_error_types': Counter([ts.error for ts in self._torrent_states.values()]),
+        })
+        data.update(self._error_manager.to_dict())
+        return data
+
+    def _add_torrent(self, torrent, download_path, *, async_add, resume_data):
+        add_params = {
+            'ti': libtorrent.torrent_info(libtorrent.bdecode(torrent)),
+            'save_path': download_path,
+            'storage_mode': libtorrent.storage_mode_t.storage_mode_sparse,
+            'paused': False,
+            'auto_managed': True,
+            'duplicate_is_error': True,
+            'flags': libtorrent.add_torrent_params_flags_t.default_flags |
+                     libtorrent.add_torrent_params_flags_t.flag_update_subscribe,
+        }
+        if resume_data:
+            add_params['resume_data'] = resume_data
+
+        if async_add:
+            self._session.async_add_torrent(add_params)
+        else:
+            handle = self._session.add_torrent(add_params)
+            torrent_state = self.__torrent_handle_added(
+                handle=handle,
+                torrent_file=torrent,
+                download_path=download_path,
+            )
+            return torrent_state
+
+    async def add_torrent(self, torrent, download_path):
+        logger.debug('Adding torrent to {}'.format(download_path))
+        return self._add_torrent(
+            torrent=torrent,
+            download_path=download_path,
+            async_add=False,
+            resume_data=None,
+        )
+
+    async def delete_torrent(self, info_hash):
+        torrent_state = self._torrent_states[info_hash]
+        self._session.remove_torrent(torrent_state.handle)

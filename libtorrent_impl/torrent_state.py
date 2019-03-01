@@ -1,0 +1,88 @@
+from clients import TorrentState, FieldInfo
+from libtorrent_impl.utils import LibtorrentClientException, format_tracker_errors
+from models import LibtorrentTorrent
+from utils import timezone_now
+
+
+class LibtorrentTorrentState(TorrentState):
+    _FIELD_MAPPING = [
+        FieldInfo('name', 'name'),
+        FieldInfo('download_path', 'save_path'),
+        FieldInfo('size', 'total_wanted'),
+        FieldInfo('downloaded', 'all_time_download'),
+        FieldInfo('uploaded', 'all_time_upload'),
+        FieldInfo('download_rate', 'download_payload_rate'),
+        FieldInfo('upload_rate', 'upload_payload_rate'),
+        FieldInfo('progress', 'progress'),
+        FieldInfo('date_added', None, converter=lambda _: None),
+
+        FieldInfo('torrent_error', 'error', public=False),
+        FieldInfo('state', 'state', str, False),
+    ]
+
+    def __init__(self, manager, handle, *, torrent_file=None, download_path=None, db_torrent=None):
+        status = handle.status()
+
+        super().__init__(manager, str(status.info_hash))
+
+        self.handle = handle
+        self.state = None
+        self.last_update = None
+
+        self.torrent_error = None
+        self.tracker_error = None
+
+        if db_torrent:
+            self.db_torrent = db_torrent
+        else:
+            self.db_torrent = self._load_or_create_db_torrent(torrent_file, download_path)
+
+        self.update_from_status(handle.status())
+
+    def _load_or_create_db_torrent(self, torrent_file, download_path):
+        try:
+            return LibtorrentTorrent.select().where(
+                LibtorrentTorrent.libtorrent == self.manager.instance_config,
+                LibtorrentTorrent.info_hash == self.info_hash,
+            ).get()
+        except LibtorrentTorrent.DoesNotExist:
+            if not torrent_file or not download_path:
+                raise LibtorrentClientException(
+                    'Creating a new LibtorrentTorrent without supplying torrent_file and download_path.')
+            return LibtorrentTorrent.create(
+                libtorrent=self.manager.instance_config,
+                info_hash=self.info_hash,
+                torrent_file=torrent_file,
+                download_path=download_path,
+                resume_data=None,  # To be filled in later from the main thread
+            )
+
+    def delete(self):
+        self.db_torrent.delete_instance()
+
+    def _update_error(self):
+        target_error = self.torrent_error or self.tracker_error
+        if self.error == target_error:
+            return False
+        self.error = target_error
+        return True
+
+    def update_from_status(self, status):
+        if self.info_hash != str(status.info_hash):
+            raise LibtorrentClientException('Updating wrong TorrentStatus')
+        self.last_update = timezone_now()
+
+        updated = self._sync_fields(status)
+        if self._update_error():
+            updated = True
+        return updated
+
+    def update_tracker_success(self):
+        if self.tracker_error:
+            self.tracker_error = format_tracker_errors(self.handle.trackers())
+        return self._update_error()
+
+    def update_tracker_error(self):
+        if not self.tracker_error:
+            self.tracker_error = format_tracker_errors(self.handle.trackers())
+        return self._update_error()

@@ -1,0 +1,7 @@
+/.idea/
+/state/
+__pycache__/
+/datapan/
+/venv/
+/.mypy_cache/
+/scratch/

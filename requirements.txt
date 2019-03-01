@@ -1,0 +1,5 @@
+aiohttp==3.5.4
+Jinja2==2.10
+peewee==3.8.2
+transmissionrpc==0.11
+pytz==2018.7
