@@ -55,4 +55,4 @@ class ErrorManager:
                 del self._current_errors[key]
 
     def to_dict(self):
-        return dict(self._current_errors)
+        return {key: error.to_dict() for key, error in self._current_errors.items()}
