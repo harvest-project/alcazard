@@ -83,3 +83,11 @@ class TransmissionAsyncExecutor:
 
     async def delete_torrent(self, t_id):
         return await asyncio.wrap_future(self._thread_pool.submit(self._delete_torrent, t_id))
+
+    def _get_session_stats(self):
+        logger.debug('Get session stats')
+        client = self._get_client()
+        return client.session_stats()
+
+    async def get_session_stats(self):
+        return await asyncio.wrap_future(self._thread_pool.submit(self._get_session_stats))

@@ -1,7 +1,10 @@
 import logging
+import time
+import traceback
 from abc import ABC, abstractmethod
+from asyncio import CancelledError
 
-from error_manager import ErrorManager
+from error_manager import ErrorManager, Severity
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +25,18 @@ class FieldInfo:
         self.remote_name = remote_name
         self.converter = converter
         self.public = public
+
+
+class SessionStats:
+    def __init__(self):
+        self.torrent_count = None
+        self.downloaded = None
+        self.uploaded = None
+        self.download_rate = None
+        self.upload_rate = None
+
+    def to_dict(self):
+        return dict(self.__dict__)
 
 
 class TorrentState:
@@ -85,6 +100,20 @@ class TorrentState:
         return result
 
 
+class PeriodicTaskInfo:
+    def __init__(self, fn, interval_seconds):
+        self.fn = fn
+        self.interval_seconds = interval_seconds
+        self.last_run_at = None
+
+    async def run_if_needed(self, current_time):
+        if not self.last_run_at or current_time - self.last_run_at > self.interval_seconds:
+            self.last_run_at = current_time
+            await self.fn()
+            return True
+        return False
+
+
 class Manager(ABC):
     key: str = None
     config_model = None
@@ -97,8 +126,12 @@ class Manager(ABC):
         self._name = '{}{:03}'.format(self.key, instance_config.id)
         # Used to track errors, warnings and info messages in the client and the error status.
         self._error_manager = ErrorManager()
-
+        # Set by children when they grab a peer_port
         self._peer_port = None
+        # Registry for the periodic tasks
+        self._periodic_tasks = []
+        # Current instance of SessionStats, as last obtained from the client
+        self._session_stats = None
 
     @property
     def name(self):
@@ -111,6 +144,10 @@ class Manager(ABC):
     @property
     def instance_config(self):
         return self._instance_config
+
+    @property
+    def session_stats(self):
+        return self._session_stats
 
     @property
     @abstractmethod
@@ -140,6 +177,7 @@ class Manager(ABC):
             'config': self.instance_config.to_dict(),
             'status': self._error_manager.status,
             'errors': self._error_manager.to_dict(),
+            'session_stats': self._session_stats.to_dict() if self._session_stats else None,
         }
 
     @abstractmethod
@@ -156,6 +194,32 @@ class Manager(ABC):
     @abstractmethod
     async def delete_torrent(self, info_hash):
         pass
+
+    async def _run_periodic_task(self, current_time, task):
+        start = time.time()
+        ran = await task.run_if_needed(current_time)
+        if ran:
+            logger.debug('{}.{} took {:.3f}'.format(self._name, task.fn.__name__, time.time() - start))
+
+    async def _run_periodic_tasks(self):
+        current_time = time.time()
+        for task in self._periodic_tasks:
+            try:
+                await self._run_periodic_task(current_time, task)
+
+                self._error_manager.clear_error(task.fn.__name__)
+            except CancelledError:
+                return
+            except Exception:
+                message = 'Periodic task {} running every {}s crashed'.format(
+                    task.fn.__name__, task.interval_seconds)
+                self._error_manager.add_error(
+                    severity=Severity.ERROR,
+                    key=task.fn.__name__,
+                    message=message,
+                    traceback=traceback.format_exc()
+                )
+                logger.exception(message)
 
 
 def get_manager_types():

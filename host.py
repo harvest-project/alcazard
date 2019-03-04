@@ -2,6 +2,7 @@ import logging
 import os
 
 from api import AlcazarAPI
+from migrations import apply_migrations
 from models import DB, Config, MODELS
 from orchestrator import AlcazarOrchestrator
 from utils import DEFAULT_PORT
@@ -16,7 +17,7 @@ class AlcazarHost:
 
     def _init_db(self):
         DB.create_tables(MODELS)
-        # TODO: Run migrations
+        apply_migrations()
 
     def config(self, api_port):
         logger.info('Configuring alcazard with state at {}'.format(self.state_path))

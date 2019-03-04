@@ -1,17 +1,13 @@
 import asyncio
-import base64
 import json
 import logging
 import os
 import subprocess
-import time
-import traceback
-from asyncio import CancelledError
 
 import transmissionrpc
 
-from clients import Manager
-from error_manager import Severity
+from clients import Manager, PeriodicTaskInfo
+from transmission.session_stats import TransmissionSessionStats
 from models import ManagedTransmissionConfig
 from transmission import params
 from transmission.executor import TransmissionAsyncExecutor
@@ -32,16 +28,23 @@ class ManagedTransmission(Manager):
         self._settings_path = os.path.join(self._state_path, 'settings.json')
 
         self._rpc_port = None
+        # Popen instance of the Transmission client
         self._process = None
+        # Thread-based async executor to offload synchronous calls off the event thread
         self._executor = None
         self._launch_datetime = None
+        # Whether the initial torrent fetch passed
         self._initialized = False
+        # Map of info_hash: TransmissionTorrentStats, storing all the torrents we know about
         self._torrent_states = {}
         # An unpleasant hack: when deleting torrents, an update could already be ongoing and a response can arrive
         # later, that includes the now deleted torrent. In order to avoid re-adding and re-deleting the torrent
         # we save the info hash here. We remove it from hereonce we receive an update without it so that it can be
         # re-added normally later
         self._deleted_info_hashes = set()
+
+        self._periodic_tasks.append(PeriodicTaskInfo(self._full_update, params.INTERVAL_FULL_UPDATE))
+        self._periodic_tasks.append(PeriodicTaskInfo(self._session_update, params.INTERVAL_SESSION_UPDATE))
 
     @property
     def num_torrents(self):
@@ -85,34 +88,22 @@ class ManagedTransmission(Manager):
 
     async def _loop(self):
         while True:
-            start = time.time()
+            await self._run_periodic_tasks()
+            await asyncio.sleep(1)
 
-            try:
-                await self._loop_iteration()
-                self._initialized = True
+    async def _session_update(self):
+        try:
+            session_stats = await self._executor.get_session_stats()
+        except transmissionrpc.TransmissionError:
+            seconds_started = (timezone_now() - self._launch_datetime).total_seconds()
+            if seconds_started <= params.STARTUP_TIMEOUT:
+                logger.debug('Obtaining client failed, still within STARTUP_TIMEOUT.')
+                return
+            raise
 
-                self._error_manager.clear_error(params.ERROR_KEY_LOOP)
-                self._error_manager.clear_error(params.ERROR_KEY_OBTAIN_CLIENT, convert_errors_to_warnings=False)
-            except CancelledError:
-                break
-            except Exception:
-                self._error_manager.add_error(
-                    severity=Severity.ERROR,
-                    key=params.ERROR_KEY_LOOP,
-                    message='Loop crashed',
-                    traceback=traceback.format_exc()
-                )
-                logger.exception('Loop crashed')
+        self._session_stats = TransmissionSessionStats(session_stats)
 
-            time_taken = time.time() - start
-            logger.debug('Full update fetch for {} took {:.3f}'.format(self._name, time_taken))
-            await asyncio.sleep(max(0, params.REFRESH_INTERVAL - time_taken))
-
-    async def _loop_iteration(self):
-        if not self._executor or not self._launch_datetime:
-            raise Exception('Not launched yet')
-
-        started = time.time()
+    async def _full_update(self):
         logger.debug('Starting full update for {}'.format(self._name))
 
         try:
@@ -120,17 +111,9 @@ class ManagedTransmission(Manager):
         except transmissionrpc.TransmissionError:
             seconds_started = (timezone_now() - self._launch_datetime).total_seconds()
             if seconds_started <= params.STARTUP_TIMEOUT:
-                self._error_manager.add_error(
-                    severity=Severity.WARNING,
-                    key=params.ERROR_KEY_OBTAIN_CLIENT,
-                    message='Not connected to transmission yet',
-                )
                 logger.debug('Obtaining client failed, still within STARTUP_TIMEOUT.')
                 return
-            else:
-                raise
-
-        processing_start = time.time()
+            raise
 
         self._initialized = True
 
@@ -150,10 +133,6 @@ class ManagedTransmission(Manager):
 
         # Keep items in _deleted_info_hashes that are still being received
         self._deleted_info_hashes = self._deleted_info_hashes.intersection(received_info_hashes)
-
-        end = time.time()
-        logger.debug('Full update for {} complete in {}, processing in {}'.format(
-            self._name, end - started, end - processing_start))
 
     def shutdown(self):
         logger.debug('Shutting down {}'.format(self._name))
@@ -217,3 +196,6 @@ class ManagedTransmission(Manager):
         await self._executor.delete_torrent(torrent_state.transmission_id)
         self._deleted_info_hashes.add(info_hash)
         self._register_t_torrent_delete(info_hash)
+
+    async def get_session_stats(self):
+        session_stats = await self._executor.get_session_stats()

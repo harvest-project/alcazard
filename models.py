@@ -73,6 +73,9 @@ class ManagedTransmissionConfig(ManagerConfig, peewee.Model):
 
 
 class ManagedLibtorrentConfig(ManagerConfig, peewee.Model):
+    total_downloaded = peewee.BigIntegerField()
+    total_uploaded = peewee.BigIntegerField()
+
     def to_dict(self):
         result = model_to_dict(self, exclude=(ManagedTransmissionConfig.realm,), recurse=False)
         result['realm'] = self.realm.name
@@ -103,10 +106,18 @@ class LibtorrentTorrent(peewee.Model):
         )
 
 
+class Migration(peewee.Model):
+    name = peewee.CharField(max_length=256)
+
+    class Meta:
+        database = DB
+
+
 MODELS = [
     Config,
     Realm,
     ManagedTransmissionConfig,
     ManagedLibtorrentConfig,
     LibtorrentTorrent,
+    Migration,
 ]

@@ -20,6 +20,7 @@ DHT_BOOTSTRAP_NODES = [
 LOOP_INTERVAL = 0.1
 POST_UPDATES_INTERVAL = 3  # Post updates every 3 minutes
 SAVE_RESUME_DATA_INTERVAL = 300  # Save resume data for all torrents (that need it) every 5 minutes
+UPDATE_SESSION_STATS_INTERVAL = 3
 SHUTDOWN_TIMEOUT = 30
 
 

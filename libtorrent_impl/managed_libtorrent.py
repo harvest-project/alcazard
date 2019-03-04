@@ -8,9 +8,11 @@ from collections import Counter
 
 import libtorrent
 
-from clients import Manager
+from clients import Manager, PeriodicTaskInfo
 from error_manager import Severity
 from libtorrent_impl import params
+from libtorrent_impl.params import POST_UPDATES_INTERVAL, SAVE_RESUME_DATA_INTERVAL, UPDATE_SESSION_STATS_INTERVAL
+from libtorrent_impl.session_stats import LibtorrentSessionStats
 from libtorrent_impl.torrent_state import LibtorrentTorrentState
 from libtorrent_impl.utils import format_libtorrent_endpoint, LibtorrentClientException
 from models import ManagedLibtorrentConfig, LibtorrentTorrent, DB
@@ -38,6 +40,17 @@ class ManagedLibtorrent(Manager):
         self._info_hashes_waiting_for_resume_data_save = set()
         # Used to cache LibtorrentTorrent model instances that we add during startup to avoid issuing N selects
         self._libtorrent_torrent_by_info_hash = {}
+        # Has this instance added all of its torrents to the session
+        self._initialized = False
+
+        # Counters for when the session is started, so that we can add libtorrent's session stats to those
+        self.start_total_downloaded = instance_config.total_downloaded
+        self.start_total_uploaded = instance_config.total_uploaded
+
+        self._periodic_tasks.append(PeriodicTaskInfo(self._post_torrent_updates, POST_UPDATES_INTERVAL))
+        self._save_resume_data_task = PeriodicTaskInfo(self._periodic_resume_save, SAVE_RESUME_DATA_INTERVAL)
+        self._periodic_tasks.append(self._save_resume_data_task)
+        self._periodic_tasks.append(PeriodicTaskInfo(self._update_session_stats, UPDATE_SESSION_STATS_INTERVAL))
 
     @property
     def num_torrents(self):
@@ -54,7 +67,7 @@ class ManagedLibtorrent(Manager):
         logger.debug('Received peer_port={} for {}'.format(self._peer_port, self._name))
 
         # Reset the timer for saving fast resume data when launched, no need to do it immediately.
-        self._last_save_resume_data_request = time.time()
+        self._save_resume_data_task.last_run_at = time.time()
 
         settings = params.get_session_settings(self._peer_port, self.config.is_dht_enabled)
         self._session = libtorrent.session(settings)
@@ -88,8 +101,8 @@ class ManagedLibtorrent(Manager):
             start = time.time()
 
             try:
-                self._loop_iteration()
-                self._initialized = True
+                await self._run_periodic_tasks()
+                self._process_alerts()
             except CancelledError:
                 break
             except Exception:
@@ -134,14 +147,22 @@ class ManagedLibtorrent(Manager):
     def _on_alert_tracker_reply(self, alert):
         info_hash = str(alert.handle.info_hash())
         logger.debug('Tracker reply for {}'.format(info_hash))
-        torrent_state = self._torrent_states[info_hash]
+        try:
+            torrent_state = self._torrent_states[info_hash]
+        except KeyError:  # Sometimes we receive updates for torrents that are now deleted
+            logger.debug('Received tracker reply from missing torrent.')
+            return
         if torrent_state.update_tracker_success():
             self._orchestrator.on_torrent_updated(torrent_state)
 
     def _on_alert_tracker_error(self, alert):
         info_hash = str(alert.handle.info_hash())
         logger.debug('Tracker error for {}'.format(info_hash))
-        torrent_state = self._torrent_states[info_hash]
+        try:
+            torrent_state = self._torrent_states[info_hash]
+        except KeyError:  # Sometimes we receive updates for torrents that are now deleted
+            logger.debug('Received tracker reply from missing torrent.')
+            return
         if torrent_state.update_tracker_error():
             self._orchestrator.on_torrent_updated(torrent_state)
 
@@ -189,25 +210,6 @@ class ManagedLibtorrent(Manager):
         key, readable_name = format_libtorrent_endpoint(alert.endpoint)
         self._error_manager.add_error(Severity.ERROR, key, 'Failed to listen on {}'.format(readable_name))
 
-    def _run_periodic_tasks(self):
-        cur_time = time.time()
-        should_post_updates = (
-                not self._last_post_updates_request or
-                cur_time - self._last_post_updates_request > params.POST_UPDATES_INTERVAL
-        )
-        if should_post_updates:
-            logger.debug('Calling post_torrent_updates')
-            self._session.post_torrent_updates()
-            self._last_post_updates_request = cur_time
-
-        should_save_resume_data = (
-                not self._last_save_resume_data_request or
-                cur_time - self._last_save_resume_data_request > params.SAVE_RESUME_DATA_INTERVAL
-        )
-        if should_save_resume_data:
-            self._save_torrents_resume_data(None, False)
-            self._last_save_resume_data_request = cur_time
-
     def __torrent_handle_added(self, handle, *, torrent_file=None, download_path=None):
         """
 
@@ -218,6 +220,8 @@ class ManagedLibtorrent(Manager):
         """
         info_hash = str(handle.info_hash())
         db_torrent = self._libtorrent_torrent_by_info_hash.pop(info_hash, None)
+        if not self._initialized and not self._libtorrent_torrent_by_info_hash:
+            self._initialized = True
         torrent_state = LibtorrentTorrentState(
             manager=self,
             handle=handle,
@@ -290,23 +294,27 @@ class ManagedLibtorrent(Manager):
                 )
                 logger.exception(message)
 
-    def _loop_iteration(self):
-        if not self._session:
-            raise LibtorrentClientException('Not launched yet')
+    async def _post_torrent_updates(self):
+        self._session.post_torrent_updates()
 
-        with DB.atomic():
-            try:
-                self._run_periodic_tasks()
-            except Exception:
-                self._error_manager.add_error(
-                    Severity.ERROR,
-                    params.ERROR_KEY_PERIODIC_TASKS,
-                    'Error running periodic tasks',
-                    traceback.format_exc(),
-                )
-                logger.exception('Failed to run periodic tasks')
+    async def _periodic_resume_save(self):
+        self._save_torrents_resume_data(None, False)
 
-        self._process_alerts()
+    async def _update_session_stats(self):
+        lt_status = self._session.status()
+        self._session_stats = LibtorrentSessionStats(
+            torrent_count=len(self._torrent_states),
+            downloaded=self.start_total_downloaded + lt_status.total_payload_download,
+            uploaded=self.start_total_uploaded + lt_status.total_payload_upload,
+            download_rate=lt_status.payload_download_rate,
+            upload_rate=lt_status.payload_upload_rate,
+        )
+        self.instance_config.total_downloaded = self._session_stats.downloaded
+        self.instance_config.total_uploaded = self._session_stats.uploaded
+        self.instance_config.save(only=(
+            ManagedLibtorrentConfig.total_downloaded,
+            ManagedLibtorrentConfig.total_uploaded,
+        ))
 
     def shutdown(self):
         start = time.time()
@@ -324,6 +332,9 @@ class ManagedLibtorrent(Manager):
             if time.time() - wait_start > params.SHUTDOWN_TIMEOUT:
                 raise LibtorrentClientException('Shutdown timeout reached.')
         logger.debug('Saving data completed in {}, session stopped.'.format(time.time() - start))
+
+        self._update_session_stats()
+
         self._session = None
 
     def get_info_dict(self):
