@@ -1,4 +1,4 @@
-import urllib.parse
+from utils import extract_name_from_announce
 
 
 def format_libtorrent_endpoint(endpoint):
@@ -19,14 +19,8 @@ def format_tracker_errors(trackers):
         last_error = announce_status['last_error']
 
         if last_error['value']:
-            try:
-                parsed_url = urllib.parse.urlparse(announce_status['url'])
-                tracker_name = parsed_url.netloc
-            except Exception:
-                tracker_name = announce_status['url']
-
             errors.append('{}: {} {}: {}'.format(
-                tracker_name,
+                extract_name_from_announce(announce_status['url']),
                 last_error['category'].capitalize(),
                 last_error['value'],
                 announce_status['message'],

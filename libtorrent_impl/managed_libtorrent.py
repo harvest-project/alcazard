@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import time
 import traceback
 from asyncio import CancelledError
@@ -338,14 +339,27 @@ class ManagedLibtorrent(Manager):
             'num_torrent_per_state': Counter([ts.state for ts in self._torrent_states.values()]),
             'torrents_with_errors': len([None for state in self._torrent_states.values() if state.error]),
             'torrent_error_types': Counter([ts.error for ts in self._torrent_states.values()]),
+            'torrent_tracker_error_types': Counter([ts.tracker_error for ts in self._torrent_states.values()]),
         })
         data.update(self._error_manager.to_dict())
         return data
 
     def _add_torrent(self, torrent, download_path, *, async_add, resume_data):
+        lt_torrent_info = libtorrent.torrent_info(libtorrent.bdecode(torrent))
+
+        # Temporary workaround until we can tell apart multi-file torrents from torrent_info
+        files = lt_torrent_info.files()
+        if files.num_files() == 1 and files.file_path(0) == files.file_name(0):
+            # Single-file torrent - save it in download_path
+            save_path = download_path
+        else:
+            # Multi-file torrent - save it in parent directory, rename to basename
+            save_path = os.path.dirname(download_path)
+            files.set_name(os.path.basename(download_path))
+
         add_params = {
-            'ti': libtorrent.torrent_info(libtorrent.bdecode(torrent)),
-            'save_path': download_path,
+            'ti': lt_torrent_info,
+            'save_path': save_path,
             'storage_mode': libtorrent.storage_mode_t.storage_mode_sparse,
             'paused': False,
             'auto_managed': True,
@@ -378,4 +392,4 @@ class ManagedLibtorrent(Manager):
 
     async def delete_torrent(self, info_hash):
         torrent_state = self._torrent_states[info_hash]
-        self._session.remove_torrent(torrent_state.handle)
+        self._session.remove_torrent(torrent_state.handle, libtorrent.options_t.delete_files)

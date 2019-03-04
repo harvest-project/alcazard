@@ -25,12 +25,27 @@ class FieldInfo:
 
 
 class TorrentState:
+    STATUS_CHECK_WAITING = 0
+    STATUS_CHECKING = 1
+    STATUS_DOWNLOADING = 2
+    STATUS_SEEDING = 3
+    STATUS_STOPPED = 4
+
+    STATUS_NAMES = {
+        STATUS_CHECK_WAITING: 'check_waiting',
+        STATUS_CHECKING: 'checking',
+        STATUS_DOWNLOADING: 'downloading',
+        STATUS_SEEDING: 'seeding',
+        STATUS_STOPPED: 'stopped',
+    }
+
     _FIELD_MAPPING = None
 
     def __init__(self, manager, info_hash):
         self.manager = manager
         self.info_hash = info_hash
 
+        self.status = None
         self.download_path = None
         self.name = None
         self.size = None
@@ -41,6 +56,7 @@ class TorrentState:
         self.progress = None
         self.date_added = None
         self.error = None
+        self.tracker_error = None
 
     def _sync_fields(self, remote):
         updated = False

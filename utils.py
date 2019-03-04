@@ -1,10 +1,13 @@
+import hashlib
 import json
 import random
 import string
 import traceback
+import urllib.parse
 from datetime import datetime
 from typing import Set
 
+import bencode
 from aiohttp import web
 from pytz import utc
 
@@ -67,3 +70,30 @@ def jsonify_exceptions(fn):
             }, status=500)
 
     return inner
+
+
+class TorrentFileInfo:
+    def __init__(self, torrent_data):
+        meta_info = bencode.bdecode(torrent_data)
+        info = meta_info['info']
+        self.name = info['name']
+        self.info_hash = hashlib.sha1(bencode.bencode(info)).hexdigest()
+        self.files = info.get('files')
+
+
+_ANNOUNCE_TO_NAME_CACHE = {}
+
+
+def extract_name_from_announce(announce):
+    name = _ANNOUNCE_TO_NAME_CACHE.get(announce)
+    if name:
+        return name
+
+    try:
+        parsed_url = urllib.parse.urlparse(announce)
+        name = parsed_url.netloc
+    except Exception:
+        name = announce
+
+    _ANNOUNCE_TO_NAME_CACHE[announce] = name
+    return name

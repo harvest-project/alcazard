@@ -1,12 +1,18 @@
 from clients import TorrentState, FieldInfo
+from libtorrent_impl.params import STATUS_MAPPING
 from libtorrent_impl.utils import LibtorrentClientException, format_tracker_errors
 from models import LibtorrentTorrent
 from utils import timezone_now
 
 
+def _convert_status(state):
+    return STATUS_MAPPING[int(state)]
+
+
 class LibtorrentTorrentState(TorrentState):
     _FIELD_MAPPING = [
         FieldInfo('name', 'name'),
+        FieldInfo('status', 'state', converter=_convert_status),
         FieldInfo('download_path', 'save_path'),
         FieldInfo('size', 'total_wanted'),
         FieldInfo('downloaded', 'all_time_download'),
@@ -15,9 +21,8 @@ class LibtorrentTorrentState(TorrentState):
         FieldInfo('upload_rate', 'upload_payload_rate'),
         FieldInfo('progress', 'progress'),
         FieldInfo('date_added', None, converter=lambda _: None),
-
-        FieldInfo('torrent_error', 'error', public=False),
-        FieldInfo('state', 'state', str, False),
+        FieldInfo('error', 'error'),
+        FieldInfo('state', 'state', converter=str, public=False),
     ]
 
     def __init__(self, manager, handle, *, torrent_file=None, download_path=None, db_torrent=None):
@@ -28,9 +33,6 @@ class LibtorrentTorrentState(TorrentState):
         self.handle = handle
         self.state = None
         self.last_update = None
-
-        self.torrent_error = None
-        self.tracker_error = None
 
         if db_torrent:
             self.db_torrent = db_torrent
@@ -60,29 +62,31 @@ class LibtorrentTorrentState(TorrentState):
     def delete(self):
         self.db_torrent.delete_instance()
 
-    def _update_error(self):
-        target_error = self.torrent_error or self.tracker_error
-        if self.error == target_error:
-            return False
-        self.error = target_error
-        return True
-
     def update_from_status(self, status):
         if self.info_hash != str(status.info_hash):
             raise LibtorrentClientException('Updating wrong TorrentStatus')
         self.last_update = timezone_now()
+        return self._sync_fields(status)
 
-        updated = self._sync_fields(status)
-        if self._update_error():
-            updated = True
-        return updated
+    def _update_tracker_error(self, tracker_error):
+        if self.tracker_error != tracker_error:
+            self.tracker_error = tracker_error
+            return True
+        return False
 
     def update_tracker_success(self):
         if self.tracker_error:
-            self.tracker_error = format_tracker_errors(self.handle.trackers())
-        return self._update_error()
+            tracker_error = format_tracker_errors(self.handle.trackers())
+            return self._update_tracker_error(tracker_error)
+        return False
 
     def update_tracker_error(self):
         if not self.tracker_error:
-            self.tracker_error = format_tracker_errors(self.handle.trackers())
-        return self._update_error()
+            tracker_error = format_tracker_errors(self.handle.trackers())
+            return self._update_tracker_error(tracker_error)
+        return False
+
+    def to_dict(self):
+        result = super().to_dict()
+        result['tracker_error'] = self.tracker_error
+        return result

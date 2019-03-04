@@ -1,5 +1,7 @@
 import libtorrent
 
+from clients import TorrentState
+
 ALERT_MASK = (
         libtorrent.alert.category_t.error_notification |
         libtorrent.alert.category_t.tracker_notification |
@@ -65,3 +67,14 @@ def get_session_settings(peer_port, enable_dht):
 ERROR_KEY_LOOP = 'loop'
 ERROR_KEY_ALERT_PROCESSING = 'alert_processing_{}'
 ERROR_KEY_PERIODIC_TASKS = 'periodic_tasks'
+
+STATUS_MAPPING = {
+    0: TorrentState.STATUS_CHECK_WAITING,  # queued_for_checking
+    1: TorrentState.STATUS_CHECKING,  # checking_files
+    2: TorrentState.STATUS_DOWNLOADING,  # downloading_metadata
+    3: TorrentState.STATUS_DOWNLOADING,  # downloading
+    4: TorrentState.STATUS_STOPPED,  # finished
+    5: TorrentState.STATUS_SEEDING,  # seeding
+    6: TorrentState.STATUS_DOWNLOADING,  # allocating
+    7: TorrentState.STATUS_CHECKING,  # checking_resume_data
+}

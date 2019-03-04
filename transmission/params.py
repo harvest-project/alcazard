@@ -1,6 +1,8 @@
+from clients import TorrentState
+
 STARTUP_TIMEOUT = 120
 SHUTDOWN_TIMEOUT = 30
-REFRESH_INTERVAL = 60
+REFRESH_INTERVAL = 5
 
 DEFAULT_TRANSMISSION_SETTINGS_TEMPLATE = {
     'peer-limit-global': 1000,
@@ -13,7 +15,17 @@ DEFAULT_TRANSMISSION_SETTINGS_TEMPLATE = {
 
 TRANSMISSION_FETCH_ARGS = [
     'id', 'name', 'hashString', 'totalSize', 'uploadedEver', 'percentDone', 'addedDate', 'errorString', 'downloadDir',
-    'downloadedEver', 'uploadedEver', 'rateDownload', 'rateUpload']
+    'downloadedEver', 'uploadedEver', 'rateDownload', 'rateUpload', 'status', 'trackerStats']
 
 ERROR_KEY_LOOP = 'loop'
 ERROR_KEY_OBTAIN_CLIENT = 'obtain_client'
+
+STATUS_MAPPING = {
+    'stopped': TorrentState.STATUS_STOPPED,
+    'check pending': TorrentState.STATUS_CHECK_WAITING,
+    'checking': TorrentState.STATUS_CHECKING,
+    'download pending': TorrentState.STATUS_STOPPED,
+    'downloading': TorrentState.STATUS_DOWNLOADING,
+    'seed pending': TorrentState.STATUS_STOPPED,
+    'seeding': TorrentState.STATUS_SEEDING,
+}

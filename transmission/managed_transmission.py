@@ -28,7 +28,6 @@ class ManagedTransmission(Manager):
     def __init__(self, orchestrator, instance_config):
         super().__init__(orchestrator, instance_config)
 
-        self._name = 'transmission{:03}'.format(instance_config.id)
         self._state_path = os.path.join(self.config.state_path, self._name)
         self._settings_path = os.path.join(self._state_path, 'settings.json')
 
@@ -145,6 +144,10 @@ class ManagedTransmission(Manager):
 
             self._register_t_torrent_update(t_torrent)
 
+        removed_info_hashes = set(self._torrent_states.keys()) - received_info_hashes
+        for removed_info_hash in removed_info_hashes:
+            self._register_t_torrent_delete(removed_info_hash)
+
         # Keep items in _deleted_info_hashes that are still being received
         self._deleted_info_hashes = self._deleted_info_hashes.intersection(received_info_hashes)
 
@@ -199,7 +202,7 @@ class ManagedTransmission(Manager):
             raise Exception(message)
 
         logger.info('Adding torrent in {}'.format(self._name))
-        t_torrent = await self._executor.add_torrent(base64.b64encode(torrent).decode(), download_path)
+        t_torrent = await self._executor.add_torrent(torrent, download_path)
         return self._register_t_torrent_update(t_torrent)
 
     async def delete_torrent(self, info_hash):
