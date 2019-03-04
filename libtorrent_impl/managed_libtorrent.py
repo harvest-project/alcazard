@@ -53,10 +53,6 @@ class ManagedLibtorrent(Manager):
         self._periodic_tasks.append(PeriodicTaskInfo(self._update_session_stats, UPDATE_SESSION_STATS_INTERVAL))
 
     @property
-    def num_torrents(self):
-        return len(self._torrent_states)
-
-    @property
     def peer_port(self):
         return self._session.listen_port(),
 
@@ -301,6 +297,9 @@ class ManagedLibtorrent(Manager):
         self._save_torrents_resume_data(None, False)
 
     async def _update_session_stats(self):
+        self._update_session_stats_sync()
+
+    def _update_session_stats_sync(self):
         lt_status = self._session.status()
         self._session_stats = LibtorrentSessionStats(
             torrent_count=len(self._torrent_states),
@@ -333,7 +332,7 @@ class ManagedLibtorrent(Manager):
                 raise LibtorrentClientException('Shutdown timeout reached.')
         logger.debug('Saving data completed in {}, session stopped.'.format(time.time() - start))
 
-        self._update_session_stats()
+        self._update_session_stats_sync()
 
         self._session = None
 

@@ -151,11 +151,6 @@ class Manager(ABC):
 
     @property
     @abstractmethod
-    def num_torrents(self):
-        pass
-
-    @property
-    @abstractmethod
     def peer_port(self):
         pass
 
@@ -172,7 +167,6 @@ class Manager(ABC):
         return {
             'type': self.key,
             'name': self._name,
-            'num_torrents': self.num_torrents,
             'peer_port': self.peer_port,
             'config': self.instance_config.to_dict(),
             'status': self._error_manager.status,

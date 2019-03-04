@@ -47,10 +47,6 @@ class ManagedTransmission(Manager):
         self._periodic_tasks.append(PeriodicTaskInfo(self._session_update, params.INTERVAL_SESSION_UPDATE))
 
     @property
-    def num_torrents(self):
-        return len(self._torrent_states)
-
-    @property
     def peer_port(self):
         return self._peer_port
 
