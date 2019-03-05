@@ -5,6 +5,7 @@ from aiohttp import web
 
 from clients import TorrentNotFoundException
 from models import Realm, DB
+from orchestrator import NoManagerForRealmException
 from utils import JsonResponse, jsonify_exceptions
 
 
@@ -80,11 +81,14 @@ class AlcazarAPI:
         if not realm:
             return JsonResponse({'detail': 'Realm does not exist. Create it by adding a client to it.'}, status=400)
 
-        torrent = await self.orchestrator.add_torrent(
-            realm=realm,
-            torrent=base64.b64decode(data['torrent']),
-            download_path=data['download_path'],
-        )
+        try:
+            torrent = await self.orchestrator.add_torrent(
+                realm=realm,
+                torrent=base64.b64decode(data['torrent']),
+                download_path=data['download_path'],
+            )
+        except NoManagerForRealmException:
+            return JsonResponse({'detail': 'No manager added for requested realm.'}, status=400)
         return JsonResponse(torrent.to_dict())
 
     @jsonify_exceptions

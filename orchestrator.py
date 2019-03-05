@@ -8,6 +8,8 @@ from models import DB
 
 logger = logging.getLogger(__name__)
 
+class NoManagerForRealmException(Exception):
+    pass
 
 class AlcazarOrchestrator:
     def __init__(self, config):
@@ -78,6 +80,8 @@ class AlcazarOrchestrator:
         logger.info('Adding torrent to realm {}'.format(realm))
         # Get the managers that we're interested in (chosen realm)
         realm_managers = self.managers_by_realm[realm.id]
+        if not realm_managers:
+            raise NoManagerForRealmException()
         # Get a dict {manager: count} for the torrent counts
         torrent_counts = Counter(self.realm_info_hash_to_manager[realm.id].values())
         # Choose the manager with the smallest count from torrent_counts
