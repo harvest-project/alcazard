@@ -21,7 +21,7 @@ class LibtorrentTorrentState(TorrentState):
         FieldInfo('upload_rate', 'upload_payload_rate'),
         FieldInfo('progress', 'progress'),
         FieldInfo('date_added', None, converter=lambda _: None),
-        FieldInfo('error', 'error'),
+        FieldInfo('error', 'error', converter=lambda i: i or None),
         FieldInfo('state', 'state', converter=str, public=False),
     ]
 

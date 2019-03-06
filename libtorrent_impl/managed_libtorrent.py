@@ -138,7 +138,7 @@ class ManagedLibtorrent(Manager):
                 self._orchestrator.on_torrent_updated(torrent_state)
 
     def __on_resume_data_completed(self, info_hash):
-        self._info_hashes_waiting_for_resume_data_save.remove(info_hash)
+        self._info_hashes_waiting_for_resume_data_save.discard(info_hash)
 
     def _on_alert_tracker_reply(self, alert):
         info_hash = str(alert.handle.info_hash())
@@ -192,8 +192,8 @@ class ManagedLibtorrent(Manager):
         for torrent_state in torrent_states:
             if torrent_state.handle.need_save_resume_data():
                 logger.debug('Requesting resume data for {}'.format(torrent_state.info_hash))
-                torrent_state.handle.save_resume_data(flags)
                 self._info_hashes_waiting_for_resume_data_save.add(torrent_state.info_hash)
+                torrent_state.handle.save_resume_data(flags)
             else:
                 skipped += 1
         logger.debug('Skipped saving resume data for {} torrents - not needed.'.format(skipped))
