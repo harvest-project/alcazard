@@ -6,7 +6,6 @@ import traceback
 from asyncio import CancelledError
 from collections import Counter
 
-import bencode
 import libtorrent
 
 from clients import Manager, PeriodicTaskInfo, TorrentAlreadyAddedException
@@ -23,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class ManagedLibtorrent(Manager):
-    key: str = 'managed_libtorrent'
+    key = 'managed_libtorrent'
     config_model = ManagedLibtorrentConfig
 
     def __init__(self, orchestrator, instance_config):
@@ -73,6 +72,7 @@ class ManagedLibtorrent(Manager):
         asyncio.ensure_future(self._load_initial_torrents())
 
     async def __load_initial_torrents(self, id_batch):
+        logger.debug('Loading initial batch of {} torrents.'.format(len(id_batch)))
         torrents = list(LibtorrentTorrent.select().where(LibtorrentTorrent.id.in_(id_batch)))
         for torrent in torrents:
             self._libtorrent_torrent_by_info_hash[torrent.info_hash] = torrent
@@ -91,6 +91,7 @@ class ManagedLibtorrent(Manager):
         ids = list(LibtorrentTorrent.select(LibtorrentTorrent.id).tuples())
         for batch in chunks(ids, 1000):
             await self.__load_initial_torrents(batch)
+            await asyncio.sleep(0.5)
         logger.info('Completed initial torrent load in {}.'.format(time.time() - start))
 
     async def _loop(self):
@@ -248,7 +249,7 @@ class ManagedLibtorrent(Manager):
         alerts = self._session.pop_alerts()
         if not len(alerts):
             return
-        logging.error('Received {} alerts'.format(len(alerts)))
+        logging.info('Received {} alerts'.format(len(alerts)))
         for alerts_batch in chunks(alerts, 5000):
             logging.debug('Processing batch of {} alerts'.format(len(alerts_batch)))
             with DB.atomic():

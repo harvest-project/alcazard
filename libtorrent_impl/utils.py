@@ -14,11 +14,12 @@ def format_libtorrent_endpoint(endpoint):
 
 def format_tracker_error(alert):
     error = alert.error
-    return '{}: {} {}: {}'.format(
+    return '{}: {} {}: {} - {}'.format(
         extract_name_from_announce(alert.url),
         error.category().name().capitalize(),
         error.value(),
         error.message(),
+        alert.msg,
     )
 
 

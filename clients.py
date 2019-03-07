@@ -121,7 +121,7 @@ class PeriodicTaskInfo:
 
 
 class Manager(ABC):
-    key: str = None
+    key = None
     config_model = None
 
     def __init__(self, orchestrator, instance_config):
