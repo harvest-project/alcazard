@@ -24,7 +24,7 @@ def parse_port_pools_fmt(port_pools_fmt):
 
 
 def get_ports_from_ranges(port_ranges):
-    ports: Set[int] = set()
+    ports = set()
     for port_range in port_ranges:
         ports.update(range(port_range[0], port_range[1] + 1))
     # Use reverse order so that calling .pop() returns the first available port

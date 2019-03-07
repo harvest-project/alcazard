@@ -36,7 +36,7 @@ def get_session_settings(peer_port, enable_dht):
         'listen_interfaces': '0.0.0.0:{0},[::]:{0}'.format(peer_port),
         'enable_dht': enable_dht,
         'dht_bootstrap_nodes': ','.join(DHT_BOOTSTRAP_NODES) if enable_dht else '',
-        'alert_queue_size': _million,  # Ridiculous number. Hopefully enough to never drop alerts.
+        'alert_queue_size': _million * 4,  # 4 per torrent, in case we can't fetch any alerts while torrents are loading
         'cache_size': 4096,  # 64MB in blocks of 16KiB
         'tick_interval': 1000,  # Maximum recommended tick length, saves CPU cycles
         'connections_limit': 400,  # Default: 200, this is reasonably higher.
@@ -57,7 +57,7 @@ def get_session_settings(peer_port, enable_dht):
         # Limits
         'active_downloads': 10,
         'active_seeds': _million,
-        'active_checking': 4,  # TODO: HACK! Actually resolve why checking is slow.
+        'active_checking': 32,  # TODO: HACK! Actually resolve why checking is slow.
         'active_dht_limit': 1000,
         'active_tracker_limit': _million,
         'active_lsd_limit': _million,
