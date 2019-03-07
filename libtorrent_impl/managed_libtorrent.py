@@ -6,9 +6,10 @@ import traceback
 from asyncio import CancelledError
 from collections import Counter
 
+import bencode
 import libtorrent
 
-from clients import Manager, PeriodicTaskInfo
+from clients import Manager, PeriodicTaskInfo, TorrentAlreadyAddedException
 from error_manager import Severity
 from libtorrent_impl import params
 from libtorrent_impl.params import POST_UPDATES_INTERVAL, SAVE_RESUME_DATA_INTERVAL, UPDATE_SESSION_STATS_INTERVAL
@@ -159,7 +160,7 @@ class ManagedLibtorrent(Manager):
         except KeyError:  # Sometimes we receive updates for torrents that are now deleted
             logger.debug('Received tracker reply from missing torrent.')
             return
-        if torrent_state.update_tracker_error():
+        if torrent_state.update_tracker_error(alert):
             self._orchestrator.on_torrent_updated(torrent_state)
 
     def _on_alert_save_resume_data(self, alert):
@@ -384,6 +385,8 @@ class ManagedLibtorrent(Manager):
             self._session.async_add_torrent(add_params)
         else:
             handle = self._session.add_torrent(add_params)
+            if str(handle.info_hash()) in self._torrent_states:
+                raise TorrentAlreadyAddedException()
             torrent_state = self.__torrent_handle_added(
                 handle=handle,
                 torrent_file=torrent,

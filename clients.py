@@ -19,6 +19,12 @@ class TorrentNotFoundException(AlcazarException):
         super().__init__(message, *args, **kwargs)
 
 
+class TorrentAlreadyAddedException(AlcazarException):
+    def __init__(self, message=None, *args, **kwargs):
+        message = message or 'Torrent already added.'
+        super().__init__(message, *args, **kwargs)
+
+
 class FieldInfo:
     def __init__(self, local_name, remote_name, converter=None, public=True):
         self.local_name = local_name

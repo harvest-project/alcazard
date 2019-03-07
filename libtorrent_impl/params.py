@@ -39,9 +39,9 @@ def get_session_settings(peer_port, enable_dht):
         'alert_queue_size': _million,  # Ridiculous number. Hopefully enough to never drop alerts.
         'cache_size': 4096,  # 64MB in blocks of 16KiB
         'tick_interval': 1000,  # Maximum recommended tick length, saves CPU cycles
-        'connections_limit': 1000,  # Default: 200, this is reasonably higher.
+        'connections_limit': 400,  # Default: 200, this is reasonably higher.
         'listen_queue_size': 32,  # Default: 5, higher recommended for higher performance clients
-        'checking_mem_usage': 4096,  # Default 1024, in 16KiB blocks - higher = faster re-checks, more memory
+        'checking_mem_usage': 2048,  # Default 1024, in 16KiB blocks - higher = faster re-checks, more memory
         # Default: 4, for some aio backends, number of threads. Number of threads available for hashing is N/2 per
         # https://github.com/arvidn/libtorrent/issues/3005, so 8 should provide at least 2 hashing threads.
         'aio_threads': 8,
@@ -57,7 +57,7 @@ def get_session_settings(peer_port, enable_dht):
         # Limits
         'active_downloads': 10,
         'active_seeds': _million,
-        'active_checking': 1,
+        'active_checking': 4,  # TODO: HACK! Actually resolve why checking is slow.
         'active_dht_limit': 1000,
         'active_tracker_limit': _million,
         'active_lsd_limit': _million,

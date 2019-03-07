@@ -12,21 +12,14 @@ def format_libtorrent_endpoint(endpoint):
     return key, readable_name
 
 
-def format_tracker_errors(trackers):
-    errors = []
-
-    for announce_status in trackers:
-        last_error = announce_status['last_error']
-
-        if last_error['value']:
-            errors.append('{}: {} {}: {}'.format(
-                extract_name_from_announce(announce_status['url']),
-                last_error['category'].capitalize(),
-                last_error['value'],
-                announce_status['message'],
-            ))
-
-    return '\n'.join(errors) if errors else None
+def format_tracker_error(alert):
+    error = alert.error
+    return '{}: {} {}: {}'.format(
+        extract_name_from_announce(alert.url),
+        error.category().name().capitalize(),
+        error.value(),
+        error.message(),
+    )
 
 
 class LibtorrentClientException(Exception):

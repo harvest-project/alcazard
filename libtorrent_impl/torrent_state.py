@@ -1,6 +1,6 @@
 from clients import TorrentState, FieldInfo
 from libtorrent_impl.params import STATUS_MAPPING
-from libtorrent_impl.utils import LibtorrentClientException, format_tracker_errors
+from libtorrent_impl.utils import LibtorrentClientException, format_tracker_error
 from models import LibtorrentTorrent
 from utils import timezone_now
 
@@ -68,22 +68,17 @@ class LibtorrentTorrentState(TorrentState):
         self.last_update = timezone_now()
         return self._sync_fields(status)
 
-    def _update_tracker_error(self, tracker_error):
-        if self.tracker_error != tracker_error:
-            self.tracker_error = tracker_error
+    def update_tracker_success(self):
+        if self.tracker_error:
+            self.tracker_error = None
             return True
         return False
 
-    def update_tracker_success(self):
-        if self.tracker_error:
-            tracker_error = format_tracker_errors(self.handle.trackers())
-            return self._update_tracker_error(tracker_error)
-        return False
-
-    def update_tracker_error(self):
-        if not self.tracker_error:
-            tracker_error = format_tracker_errors(self.handle.trackers())
-            return self._update_tracker_error(tracker_error)
+    def update_tracker_error(self, alert):
+        tracker_error = format_tracker_error(alert)
+        if self.tracker_error != tracker_error:
+            self.tracker_error = tracker_error
+            return True
         return False
 
     def to_dict(self):
