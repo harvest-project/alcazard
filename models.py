@@ -85,6 +85,8 @@ class ManagedLibtorrentConfig(ManagerConfig, peewee.Model):
     def create_new(cls, realm):
         return cls.create(
             realm=realm,
+            total_downloaded=0,
+            total_uploaded=0,
         )
 
     class Meta:
