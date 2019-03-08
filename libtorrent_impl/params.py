@@ -51,7 +51,7 @@ def get_session_settings(peer_port, enable_dht):
 
         # Tracker scrape settings supporting large number of torrents
         'tracker_completion_timeout': 120,  # Up from a default of 30 secs
-        'tracker_receive_timeout': 30,  # Up from a default of 30 secs
+        'tracker_receive_timeout': 60,  # Up from a default of 10 secs
         'stop_tracker_timeout': 60,  # Up from a default of 5 secs, as all the torrents will want to stop
 
         # Slow torrents
