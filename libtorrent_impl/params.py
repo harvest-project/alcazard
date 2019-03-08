@@ -64,7 +64,7 @@ def get_session_settings(peer_port, enable_dht):
         'active_seeds': _million,
         'active_checking': 32,  # TODO: HACK! Actually resolve why checking is slow.
         'active_dht_limit': 1000,
-        'active_tracker_limit': _million,
+        'active_tracker_limit': 900,
         'active_lsd_limit': _million,
         'active_limit': _million,
     }

@@ -33,6 +33,7 @@ class LibtorrentTorrentState(TorrentState):
         self.handle = handle
         self.state = None
         self.last_update = None
+        self.waiting_for_tracker_reply = True
 
         if db_torrent:
             self.db_torrent = db_torrent
@@ -69,12 +70,16 @@ class LibtorrentTorrentState(TorrentState):
         return self._sync_fields(status)
 
     def update_tracker_success(self):
+        self.waiting_for_tracker_reply = False
+
         if self.tracker_error:
             self.tracker_error = None
             return True
         return False
 
     def update_tracker_error(self, alert):
+        self.waiting_for_tracker_reply = False
+
         tracker_error = format_tracker_error(alert)
         if self.tracker_error != tracker_error:
             self.tracker_error = tracker_error

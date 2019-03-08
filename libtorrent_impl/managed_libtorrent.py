@@ -91,9 +91,9 @@ class ManagedLibtorrent(Manager):
     async def _load_initial_torrents(self):
         start = time.time()
         ids = list(LibtorrentTorrent.select(LibtorrentTorrent.id).tuples())
-        for batch in chunks(ids, 1000):
+        for batch in chunks(ids, 100):
             await self.__load_initial_torrents(batch)
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.2)
         logger.info('Completed initial torrent load in {}.'.format(time.time() - start))
 
     async def _loop(self):
@@ -355,12 +355,20 @@ class ManagedLibtorrent(Manager):
         return data
 
     def get_debug_dict(self):
+        def _get_tracker_status(ts):
+            if ts.waiting_for_tracker_reply:
+                return 'pending'
+            if ts.tracker_error:
+                return 'error'
+            return 'success'
+
         data = super().get_debug_dict()
         data.update({
             'num_torrent_per_state': Counter([ts.state for ts in self._torrent_states.values()]),
             'torrents_with_errors': len([None for state in self._torrent_states.values() if state.error]),
             'torrent_error_types': Counter([ts.error for ts in self._torrent_states.values()]),
             'torrent_tracker_error_types': Counter([ts.tracker_error for ts in self._torrent_states.values()]),
+            'torrent_tracker_statuses': Counter([_get_tracker_status(ts) for ts in self._torrent_states.values()]),
             'metrics': self._metrics,
         })
         data.update(self._error_manager.to_dict())
