@@ -90,7 +90,7 @@ class ManagedLibtorrent(Manager):
 
     async def _load_initial_torrents(self):
         start = time.time()
-        ids = list(LibtorrentTorrent.select(LibtorrentTorrent.id).tuples())[:100]
+        ids = list(LibtorrentTorrent.select(LibtorrentTorrent.id).tuples())
         for batch in chunks(ids, 1000):
             await self.__load_initial_torrents(batch)
             await asyncio.sleep(1)
