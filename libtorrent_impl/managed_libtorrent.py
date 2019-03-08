@@ -42,6 +42,8 @@ class ManagedLibtorrent(Manager):
         self._libtorrent_torrent_by_info_hash = {}
         # Has this instance added all of its torrents to the session
         self._initialized = False
+        # Metrics refreshed together with session stats
+        self._metrics = None
 
         # Counters for when the session is started, so that we can add libtorrent's session stats to those
         self.start_total_downloaded = instance_config.total_downloaded
@@ -88,10 +90,10 @@ class ManagedLibtorrent(Manager):
 
     async def _load_initial_torrents(self):
         start = time.time()
-        ids = list(LibtorrentTorrent.select(LibtorrentTorrent.id).tuples())
+        ids = list(LibtorrentTorrent.select(LibtorrentTorrent.id).tuples())[:100]
         for batch in chunks(ids, 1000):
             await self.__load_initial_torrents(batch)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1)
         logger.info('Completed initial torrent load in {}.'.format(time.time() - start))
 
     async def _loop(self):
@@ -208,6 +210,9 @@ class ManagedLibtorrent(Manager):
         key, readable_name = format_libtorrent_endpoint(alert.endpoint)
         self._error_manager.add_error(Severity.ERROR, key, 'Failed to listen on {}'.format(readable_name))
 
+    def _on_alert_session_stats(self, alert):
+        self._metrics = dict(alert.values)
+
     def __torrent_handle_added(self, handle, *, torrent_file=None, download_path=None):
         """
 
@@ -281,6 +286,8 @@ class ManagedLibtorrent(Manager):
                     self._on_alert_listen_failed(a)
                 elif isinstance(a, libtorrent.torrent_removed_alert):
                     self._on_alert_torrent_removed(a)
+                elif isinstance(a, libtorrent.session_stats_alert):
+                    self._on_alert_session_stats(a)
             except Exception:
                 alert_type_name = type(a).__name__
                 message = 'Error processing alert of type {}'.format(alert_type_name)
@@ -302,6 +309,8 @@ class ManagedLibtorrent(Manager):
         self._update_session_stats_sync()
 
     def _update_session_stats_sync(self):
+        self._session.post_session_stats()
+
         lt_status = self._session.status()
         self._session_stats = LibtorrentSessionStats(
             torrent_count=len(self._torrent_states),
@@ -352,6 +361,7 @@ class ManagedLibtorrent(Manager):
             'torrents_with_errors': len([None for state in self._torrent_states.values() if state.error]),
             'torrent_error_types': Counter([ts.error for ts in self._torrent_states.values()]),
             'torrent_tracker_error_types': Counter([ts.tracker_error for ts in self._torrent_states.values()]),
+            'metrics': self._metrics,
         })
         data.update(self._error_manager.to_dict())
         return data

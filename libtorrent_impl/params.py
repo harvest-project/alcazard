@@ -49,6 +49,11 @@ def get_session_settings(peer_port, enable_dht):
         'max_retry_port_bind': 0,  # Do not allow trying port+1 when unable to bind
         'unchoke_slots_limit': 64,  # Number of unchoked peers, essentially seeding/downloading from.
 
+        # Tracker scrape settings supporting large number of torrents
+        'tracker_completion_timeout': 120,  # Up from a default of 30 secs
+        'tracker_receive_timeout': 30,  # Up from a default of 30 secs
+        'stop_tracker_timeout': 60,  # Up from a default of 5 secs, as all the torrents will want to stop
+
         # Slow torrents
         'dont_count_slow_torrents': True,  # Torrents slower than below are not counted as (up/down)loading
         'inactive_down_rate': 10 * 1024,
