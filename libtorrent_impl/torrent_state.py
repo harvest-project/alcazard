@@ -10,6 +10,11 @@ def _convert_status(state):
 
 
 class LibtorrentTorrentState(TorrentState):
+    TRACKER_PENDING = 0
+    TRACKER_ANNOUNCING = 1
+    TRACKER_SUCCESS = 2
+    TRACKER_ERROR = 3
+
     _FIELD_MAPPING = [
         FieldInfo('name', 'name'),
         FieldInfo('status', 'state', converter=_convert_status),
@@ -33,7 +38,7 @@ class LibtorrentTorrentState(TorrentState):
         self.handle = handle
         self.state = None
         self.last_update = None
-        self.waiting_for_tracker_reply = True
+        self.tracker_status = self.TRACKER_PENDING
 
         if db_torrent:
             self.db_torrent = db_torrent
@@ -70,7 +75,7 @@ class LibtorrentTorrentState(TorrentState):
         return self._sync_fields(status)
 
     def update_tracker_success(self):
-        self.waiting_for_tracker_reply = False
+        self.tracker_status = self.TRACKER_SUCCESS
 
         if self.tracker_error:
             self.tracker_error = None
@@ -78,7 +83,7 @@ class LibtorrentTorrentState(TorrentState):
         return False
 
     def update_tracker_error(self, alert):
-        self.waiting_for_tracker_reply = False
+        self.tracker_status = self.TRACKER_ERROR
 
         tracker_error = format_tracker_error(alert)
         if self.tracker_error != tracker_error:

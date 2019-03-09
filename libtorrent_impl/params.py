@@ -56,17 +56,18 @@ def get_session_settings(peer_port, enable_dht):
 
         # Slow torrents
         'dont_count_slow_torrents': True,  # Torrents slower than below are not counted as (up/down)loading
+        'auto_manage_startup': 60,
         'inactive_down_rate': 10 * 1024,
         'inactive_up_rate': 10 * 1024,
 
         # Limits
-        'active_downloads': 10,
-        'active_seeds': _million,
+        'active_downloads': 8,
+        'active_seeds': -1,
         'active_checking': 32,  # TODO: HACK! Actually resolve why checking is slow.
         'active_dht_limit': 1000,
-        'active_tracker_limit': 900,
-        'active_lsd_limit': _million,
-        'active_limit': _million,
+        'active_tracker_limit': -1,
+        'active_lsd_limit': -1,
+        'active_limit': -1,
     }
 
 

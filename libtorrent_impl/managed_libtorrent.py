@@ -93,7 +93,7 @@ class ManagedLibtorrent(Manager):
         ids = list(LibtorrentTorrent.select(LibtorrentTorrent.id).tuples())
         for batch in chunks(ids, 100):
             await self.__load_initial_torrents(batch)
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.5)
         logger.info('Completed initial torrent load in {}.'.format(time.time() - start))
 
     async def _loop(self):
@@ -143,6 +143,16 @@ class ManagedLibtorrent(Manager):
 
     def __on_resume_data_completed(self, info_hash):
         self._info_hashes_waiting_for_resume_data_save.discard(info_hash)
+
+    def _on_alert_tracker_announce(self, alert):
+        info_hash = str(alert.handle.info_hash())
+        logger.debug('Tracker announce for {}'.format(info_hash))
+        try:
+            torrent_state = self._torrent_states[info_hash]
+        except KeyError:  # Sometimes we receive updates for torrents that are now deleted
+            logger.debug('Received tracker reply from missing torrent.')
+            return
+        torrent_state.tracker_state = LibtorrentTorrentState.TRACKER_ANNOUNCING
 
     def _on_alert_tracker_reply(self, alert):
         info_hash = str(alert.handle.info_hash())
@@ -272,6 +282,8 @@ class ManagedLibtorrent(Manager):
                     self._on_alert_state_update(a)
                 elif isinstance(a, libtorrent.torrent_finished_alert):
                     self._on_alert_torrent_finished(a)
+                elif isinstance(a, libtorrent.tracker_announce_alert):
+                    self._on_alert_tracker_announce(a)
                 elif isinstance(a, libtorrent.tracker_reply_alert):
                     self._on_alert_tracker_reply(a)
                 elif isinstance(a, libtorrent.tracker_error_alert):
@@ -356,11 +368,12 @@ class ManagedLibtorrent(Manager):
 
     def get_debug_dict(self):
         def _get_tracker_status(ts):
-            if ts.waiting_for_tracker_reply:
-                return 'pending'
-            if ts.tracker_error:
-                return 'error'
-            return 'success'
+            return {
+                LibtorrentTorrentState.TRACKER_PENDING: 'pending',
+                LibtorrentTorrentState.TRACKER_ANNOUNCING: 'announcing',
+                LibtorrentTorrentState.TRACKER_SUCCESS: 'success',
+                LibtorrentTorrentState.TRACKER_ERROR: 'error',
+            }[ts.tracker_status]
 
         data = super().get_debug_dict()
         data.update({
