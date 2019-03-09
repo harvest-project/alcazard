@@ -383,6 +383,7 @@ class ManagedLibtorrent(Manager):
             'torrent_tracker_error_types': Counter([ts.tracker_error for ts in self._torrent_states.values()]),
             'torrent_tracker_statuses': Counter([_get_tracker_status(ts) for ts in self._torrent_states.values()]),
             'metrics': self._metrics,
+            'settings': dict(sorted(self._session.get_settings().items())),
         })
         data.update(self._error_manager.to_dict())
         return data
