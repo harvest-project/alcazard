@@ -1,5 +1,6 @@
 from clients import TorrentState
 
+INTERVAL_LOOP = 1  # Interval in seconds between loop iterations - running scheduled tasks
 INTERVAL_FULL_UPDATE = 300
 INTERVAL_QUICK_UPDATE = 3
 INTERVAL_SESSION_UPDATE = 3

@@ -91,6 +91,7 @@ class ManagedLibtorrent(Manager):
             self._initial_torrents_remaining -= 1
 
     async def _load_initial_torrents(self):
+        logger.info('Starting initial torrent load.')
         start = time.time()
         ids = list(LibtorrentTorrent.select(LibtorrentTorrent.id).tuples())
         self._initial_torrents_remaining = len(ids)
@@ -292,7 +293,7 @@ class ManagedLibtorrent(Manager):
         logging.info('Received {} alerts'.format(len(alerts)))
         for alerts_batch in chunks(alerts, params.ALERT_BATCH_SIZE):
             self.__process_alerts(alerts_batch)
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(params.ALERT_BATCH_SLEEP)
 
     @DB.atomic()
     def __process_alerts(self, alerts):

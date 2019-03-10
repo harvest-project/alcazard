@@ -54,7 +54,7 @@ class BaseTransmission(Manager):
     async def _loop(self):
         while True:
             await self._run_periodic_tasks()
-            await asyncio.sleep(1)
+            await asyncio.sleep(params.INTERVAL_LOOP)
 
     async def _session_update(self):
         await self._executor.ensure_client(self._launch_deadline)
