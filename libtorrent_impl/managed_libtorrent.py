@@ -7,7 +7,6 @@ from asyncio import CancelledError
 from collections import Counter
 
 import libtorrent
-
 from clients import Manager, PeriodicTaskInfo, TorrentAlreadyAddedException
 from error_manager import Severity
 from libtorrent_impl import params
@@ -260,7 +259,7 @@ class ManagedLibtorrent(Manager):
         del self._torrent_states[info_hash]
         self._orchestrator.on_torrent_removed(self, info_hash)
 
-    def _process_alerts(self):
+    def _process_alerts(self, allow_sleep=True):
         alerts = self._session.pop_alerts()
         if not len(alerts):
             return
@@ -269,6 +268,8 @@ class ManagedLibtorrent(Manager):
             logging.debug('Processing batch of {} alerts'.format(len(alerts_batch)))
             with DB.atomic():
                 self.__process_alerts(alerts_batch)
+            if allow_sleep:
+                await asyncio.sleep(0.05)  # Sleep between alert batches to allow other processing
 
     def __process_alerts(self, alerts):
         for a in alerts:
@@ -349,7 +350,7 @@ class ManagedLibtorrent(Manager):
         logger.debug('Waiting for save resume data to complete. Running alert poll loop.')
         wait_start = time.time()
         while self._info_hashes_waiting_for_resume_data_save:
-            self._process_alerts()
+            self._process_alerts(allow_sleep=False)  # Process as fast as possible
             time.sleep(params.LOOP_INTERVAL)
             if time.time() - wait_start > params.SHUTDOWN_TIMEOUT:
                 raise LibtorrentClientException('Shutdown timeout reached.')

@@ -8,8 +8,10 @@ from models import DB
 
 logger = logging.getLogger(__name__)
 
+
 class NoManagerForRealmException(Exception):
     pass
+
 
 class AlcazarOrchestrator:
     def __init__(self, config):
@@ -69,10 +71,10 @@ class AlcazarOrchestrator:
         return manager
 
     @DB.atomic()
-    def add_instance(self, realm, instance_type):
+    def add_instance(self, realm, instance_type, config_kwargs):
         logger.info('Adding instance {} to realm {}'.format(instance_type, realm.name))
         manager = self.manager_types[instance_type]
-        instance_config = manager.config_model.create_new(realm=realm)
+        instance_config = manager.config_model.create_new(realm=realm, **config_kwargs)
         instance = self._load_manager_for_config(manager, instance_config)
         return instance
 

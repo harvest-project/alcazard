@@ -39,7 +39,7 @@ def generate_password(length):
 class JsonResponse(web.Response):
     def __init__(self, data, compact=True, **kwargs):
         kwargs.setdefault('content_type', 'application/json')
-        indent = 0 if compact else 4
+        indent = None if compact else 4
         super().__init__(text=json.dumps(data, indent=indent), **kwargs)
 
 

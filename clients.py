@@ -195,19 +195,20 @@ class Manager(ABC):
     async def delete_torrent(self, info_hash):
         pass
 
-    async def _run_periodic_task(self, current_time, task):
+    async def _run_periodic_task_if_needed(self, current_time, task):
         start = time.time()
         ran = await task.run_if_needed(current_time)
         if ran:
             logger.debug('{}.{} took {:.3f}'.format(self._name, task.fn.__name__, time.time() - start))
+        return ran
 
     async def _run_periodic_tasks(self):
         current_time = time.time()
         for task in self._periodic_tasks:
             try:
-                await self._run_periodic_task(current_time, task)
-
-                self._error_manager.clear_error(task.fn.__name__)
+                ran = await self._run_periodic_task_if_needed(current_time, task)
+                if ran:
+                    self._error_manager.clear_error(task.fn.__name__)
             except CancelledError:
                 return
             except Exception:
@@ -230,6 +231,12 @@ def get_manager_types():
         managers.append(ManagedTransmission)
     except (ImportError, ModuleNotFoundError) as exc:
         logger.warning('Unable import managed_transmission: {}.'.format(exc))
+
+    try:
+        from transmission.remote_transmission import RemoteTransmission
+        managers.append(RemoteTransmission)
+    except (ImportError, ModuleNotFoundError) as exc:
+        logger.warning('Unable import remote_transmission: {}.'.format(exc))
 
     try:
         from libtorrent_impl.managed_libtorrent import ManagedLibtorrent

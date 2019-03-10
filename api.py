@@ -14,7 +14,9 @@ class AlcazarAPI:
         self.config = config
         self.orchestrator = orchestrator
 
-        self.app = web.Application()
+        self.app = web.Application(
+            client_max_size=16 * 1024 * 1024,  # 16MB max request size
+        )
         self.app.add_routes([
             web.get('/', self.index),
             web.get('/ping', self.ping),
@@ -64,6 +66,7 @@ class AlcazarAPI:
         instance = self.orchestrator.add_instance(
             realm=realm,
             instance_type=data['instance_type'],
+            config_kwargs=data.get('config', {}),
         )
         return JsonResponse(instance.get_info_dict())
 

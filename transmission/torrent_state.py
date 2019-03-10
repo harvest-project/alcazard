@@ -4,14 +4,17 @@ from utils import extract_name_from_announce
 
 
 def _get_tracker_errors(tracker_stats):
-    tracker_error = None
     for tracker_status in tracker_stats:
-        if not tracker_status['lastAnnounceSucceeded']:
-            tracker_error = '{}: {}'.format(
+        if tracker_status['lastAnnounceResult'] == '':
+            continue  # Still waiting
+        elif tracker_status['lastAnnounceResult'] == 'Success':
+            return None  # At least one tracker succeeded means the torrent is working
+        else:
+            return '{}: {}'.format(
                 extract_name_from_announce(tracker_status['announce']),
                 tracker_status['lastAnnounceResult'],
             )
-    return tracker_error
+    return None
 
 
 class TransmissionTorrentState(TorrentState):

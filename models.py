@@ -72,6 +72,31 @@ class ManagedTransmissionConfig(ManagerConfig, peewee.Model):
         database = DB
 
 
+class RemoteTransmissionConfig(ManagerConfig, peewee.Model):
+    rpc_host = peewee.TextField()
+    rpc_port = peewee.IntegerField()
+    rpc_username = peewee.TextField()
+    rpc_password = peewee.TextField()
+
+    def to_dict(self):
+        result = model_to_dict(self, exclude=(ManagedTransmissionConfig.realm,), recurse=False)
+        result['realm'] = self.realm.name
+        return result
+
+    @classmethod
+    def create_new(cls, realm, host, port, username, password):
+        return cls.create(
+            realm=realm,
+            rpc_host=host,
+            rpc_port=port,
+            rpc_username=username,
+            rpc_password=password,
+        )
+
+    class Meta:
+        database = DB
+
+
 class ManagedLibtorrentConfig(ManagerConfig, peewee.Model):
     total_downloaded = peewee.BigIntegerField()
     total_uploaded = peewee.BigIntegerField()
@@ -119,6 +144,7 @@ MODELS = [
     Config,
     Realm,
     ManagedTransmissionConfig,
+    RemoteTransmissionConfig,
     ManagedLibtorrentConfig,
     LibtorrentTorrent,
     Migration,
