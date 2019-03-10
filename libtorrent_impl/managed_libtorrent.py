@@ -7,6 +7,7 @@ from asyncio import CancelledError
 from collections import Counter
 
 import libtorrent
+
 from clients import Manager, PeriodicTaskInfo, TorrentAlreadyAddedException
 from error_manager import Severity
 from libtorrent_impl import params
@@ -14,7 +15,7 @@ from libtorrent_impl.session_stats import LibtorrentSessionStats
 from libtorrent_impl.torrent_state import LibtorrentTorrentState
 from libtorrent_impl.utils import format_libtorrent_endpoint, LibtorrentClientException
 from models import ManagedLibtorrentConfig, LibtorrentTorrent, DB
-from utils import chunks
+from utils import chunks, timezone_now
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +39,10 @@ class ManagedLibtorrent(Manager):
         self._info_hashes_waiting_for_resume_data_save = set()
         # Used to cache LibtorrentTorrent model instances that we add during startup to avoid issuing N selects
         self._libtorrent_torrent_by_info_hash = {}
-        # Has this instance added all of its torrents to the session
-        self._initialized = False
         # Metrics refreshed together with session stats
         self._metrics = None
+        # Number of initial torrents remaining to be added
+        self._initial_torrents_remaining = None
 
         # Counters for when the session is started, so that we can add libtorrent's session stats to those
         self.start_total_downloaded = instance_config.total_downloaded
@@ -58,6 +59,7 @@ class ManagedLibtorrent(Manager):
         return self._session.listen_port(),
 
     def launch(self):
+        super().launch()
         logger.debug('Launching {}'.format(self._name))
 
         self._peer_port = self._orchestrator.grab_peer_port()
@@ -86,10 +88,12 @@ class ManagedLibtorrent(Manager):
             # We will not need the torrent_file anymore and the resume_data will be regenerated for saving
             torrent.torrent_file = None
             torrent.resume_data = None
+            self._initial_torrents_remaining -= 1
 
     async def _load_initial_torrents(self):
         start = time.time()
         ids = list(LibtorrentTorrent.select(LibtorrentTorrent.id).tuples())
+        self._initial_torrents_remaining = len(ids)
         for batch in chunks(ids, params.INITIAL_TORRENT_LOAD_BATCH_SIZE):
             await self.__load_initial_torrents(batch)
             await asyncio.sleep(params.INITIAL_TORRENT_LOAD_BATCH_SLEEP)
@@ -233,8 +237,16 @@ class ManagedLibtorrent(Manager):
         """
         info_hash = str(handle.info_hash())
         db_torrent = self._libtorrent_torrent_by_info_hash.pop(info_hash, None)
-        if not self._initialized and not self._libtorrent_torrent_by_info_hash:
+
+        completed_loading = (
+                not self._initialized and
+                self._initial_torrents_remaining == 0 and
+                not self._libtorrent_torrent_by_info_hash
+        )
+        if completed_loading:
+            self._initialize_time_seconds = (timezone_now() - self._launch_datetime).total_seconds()
             self._initialized = True
+
         torrent_state = LibtorrentTorrentState(
             manager=self,
             handle=handle,
@@ -395,6 +407,7 @@ class ManagedLibtorrent(Manager):
         data = super().get_debug_dict()
         data.update({
             'num_torrent_per_state': Counter([ts.state for ts in self._torrent_states.values()]),
+            'initial_torrents_remaining': self._initial_torrents_remaining,
             'torrents_with_errors': len([None for state in self._torrent_states.values() if state.error]),
             'torrent_error_types': Counter([ts.error for ts in self._torrent_states.values()]),
             'torrent_tracker_error_types': Counter([ts.tracker_error for ts in self._torrent_states.values()]),
@@ -402,7 +415,6 @@ class ManagedLibtorrent(Manager):
             'metrics': self._metrics,
             'settings': dict(sorted(self._session.get_settings().items())),
         })
-        data.update(self._error_manager.to_dict())
         return data
 
     def _add_torrent(self, torrent, download_path, *, async_add, resume_data):

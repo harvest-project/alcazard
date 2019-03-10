@@ -21,16 +21,10 @@ class BaseTransmission(Manager):
         self._rpc_port = None
         # Thread-based async executor to offload synchronous calls off the event thread
         self._executor = None
-        # When the instance was launched
-        self._launch_datetime = None
-        # Whether the initial torrent fetch passed
-        self._initialized = False
         # Map of info_hash: TransmissionTorrentStats, storing all the torrents we know about
         self._torrent_states = {}
         # How long the last full update took
         self._last_full_update_seconds = None
-        # Initialization time from launch to first full update
-        self._initialize_time_seconds = None
 
         # An unpleasant hack: when deleting torrents, an update could already be ongoing and a response can arrive
         # later, that includes the now deleted torrent. In order to avoid re-adding and re-deleting the torrent
@@ -46,7 +40,7 @@ class BaseTransmission(Manager):
         return self._launch_datetime + datetime.timedelta(seconds=self.STARTUP_TIMEOUT)
 
     def launch(self):
-        self._launch_datetime = timezone_now()
+        super().launch()
         asyncio.ensure_future(self._loop())
 
     def shutdown(self):
@@ -95,14 +89,12 @@ class BaseTransmission(Manager):
     def get_info_dict(self):
         data = super().get_info_dict()
         data.update({
-            'initialized': self._initialized,
         })
         return data
 
     def get_debug_dict(self):
         data = super().get_debug_dict()
         data.update({
-            'initialize_time_seconds': self._initialize_time_seconds,
             'last_full_update_seconds': self._last_full_update_seconds,
         })
         return data

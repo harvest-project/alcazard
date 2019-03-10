@@ -14,10 +14,9 @@ def format_libtorrent_endpoint(endpoint):
 
 def format_tracker_error(alert):
     error = alert.error
+    msg = error.message().capitalize()
     if alert.msg:
-        msg = '{} - {}'.format(error.message(), alert.msg)
-    else:
-        msg = error.message()
+        msg += ' - {}'.format(alert.msg)
     msg += ' ({}; {} {})'.format(
         extract_name_from_announce(alert.url),
         error.category().name().capitalize(),

@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from asyncio import CancelledError
 
 from error_manager import ErrorManager, Severity
+from utils import timezone_now
 
 logger = logging.getLogger(__name__)
 
@@ -126,8 +127,11 @@ class Manager(ABC):
     config_model = None
 
     def __init__(self, orchestrator, instance_config):
+        # The Orchestrator object this manager belongs to
         self._orchestrator = orchestrator
+        # The global config of the orchestrator
         self._config = orchestrator.config
+        # ManagerConfig for this instance
         self._instance_config = instance_config
         # Named used for display/system purposes
         self._name = '{}{:03}'.format(self.key, instance_config.id)
@@ -139,6 +143,12 @@ class Manager(ABC):
         self._periodic_tasks = []
         # Current instance of SessionStats, as last obtained from the client
         self._session_stats = None
+        # Has the client been fully initialized (all initial data loaded)
+        self._initialized = False
+        # Initialization time from launch in seconds
+        self._initialize_time_seconds = None
+        # When the instance was launched
+        self._launch_datetime = None
 
     @property
     def name(self):
@@ -163,7 +173,7 @@ class Manager(ABC):
 
     @abstractmethod
     def launch(self):
-        pass
+        self._launch_datetime = timezone_now()
 
     @abstractmethod
     def shutdown(self):
@@ -176,6 +186,7 @@ class Manager(ABC):
             'name': self._name,
             'peer_port': self.peer_port,
             'config': self.instance_config.to_dict(),
+            'initialized': self._initialized,
             'status': self._error_manager.status,
             'errors': self._error_manager.to_dict(),
             'session_stats': self._session_stats.to_dict() if self._session_stats else None,
@@ -185,6 +196,7 @@ class Manager(ABC):
     def get_debug_dict(self):
         data = self.get_info_dict()
         data.update({
+            'initialize_time_seconds': self._initialize_time_seconds,
         })
         return data
 
