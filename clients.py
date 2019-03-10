@@ -201,7 +201,7 @@ class Manager(ABC):
         return data
 
     @abstractmethod
-    async def add_torrent(self, torrent, download_path):
+    async def add_torrent(self, torrent, download_path, name):
         pass
 
     @abstractmethod

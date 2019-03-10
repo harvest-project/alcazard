@@ -21,9 +21,17 @@ def _migration_add_libtorrent_download_upload(migrator):
     )
 
 
+def _migration_add_libtorrent_torrent_name(migrator):
+    name = name = peewee.TextField(default='')
+    migrate.migrate(
+        migrator.add_column('libtorrenttorrent', 'name', name),
+    )
+
+
 MIGRATIONS = [
     ('0001_initial', _migration_initial),
     ('0002_add_libtorrent_download_upload', _migration_add_libtorrent_download_upload),
+    ('0003_add_libtorrent_torrent_name', _migration_add_libtorrent_torrent_name),
 ]
 
 

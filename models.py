@@ -124,6 +124,7 @@ class LibtorrentTorrent(peewee.Model):
     info_hash = peewee.CharField(max_length=40, index=True)
     torrent_file = peewee.BlobField()
     download_path = peewee.TextField()
+    name = peewee.TextField()
     resume_data = peewee.BlobField(null=True)
 
     class Meta:

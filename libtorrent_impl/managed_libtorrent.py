@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 import time
 import traceback
 from asyncio import CancelledError
@@ -83,6 +82,7 @@ class ManagedLibtorrent(Manager):
                 torrent=torrent.torrent_file,
                 download_path=torrent.download_path,
                 async_add=True,
+                name=torrent.name,
                 resume_data=torrent.resume_data,
             )
             # We will not need the torrent_file anymore and the resume_data will be regenerated for saving
@@ -417,22 +417,16 @@ class ManagedLibtorrent(Manager):
         })
         return data
 
-    def _add_torrent(self, torrent, download_path, *, async_add, resume_data):
+    def _add_torrent(self, torrent, download_path, name, *, async_add, resume_data):
         lt_torrent_info = libtorrent.torrent_info(libtorrent.bdecode(torrent))
 
-        # Temporary workaround until we can tell apart multi-file torrents from torrent_info
-        files = lt_torrent_info.files()
-        if files.num_files() == 1 and files.file_path(0) == files.file_name(0):
-            # Single-file torrent - save it in download_path
-            save_path = download_path
-        else:
-            # Multi-file torrent - save it in parent directory, rename to basename
-            save_path = os.path.dirname(download_path)
-            files.set_name(os.path.basename(download_path))
+        if name is not None:
+            files = lt_torrent_info.files()
+            files.set_name(name)
 
         add_params = {
             'ti': lt_torrent_info,
-            'save_path': save_path,
+            'save_path': download_path,
             'storage_mode': libtorrent.storage_mode_t.storage_mode_sparse,
             'paused': False,
             'auto_managed': True,
@@ -456,11 +450,12 @@ class ManagedLibtorrent(Manager):
             )
             return torrent_state
 
-    async def add_torrent(self, torrent, download_path):
+    async def add_torrent(self, torrent, download_path, name):
         logger.debug('Adding torrent to {}'.format(download_path))
         return self._add_torrent(
             torrent=torrent,
             download_path=download_path,
+            name=name,
             async_add=False,
             resume_data=None,
         )

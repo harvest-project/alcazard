@@ -25,6 +25,10 @@ class BaseTransmission(Manager):
         self._torrent_states = {}
         # How long the last full update took
         self._last_full_update_seconds = None
+        # How long the last quick update took
+        self._last_quick_update_seconds = None
+        # Set of info hashes for quick update
+        self._quick_update_info_hashes = set()
 
         # An unpleasant hack: when deleting torrents, an update could already be ongoing and a response can arrive
         # later, that includes the now deleted torrent. In order to avoid re-adding and re-deleting the torrent
@@ -33,6 +37,7 @@ class BaseTransmission(Manager):
         self._deleted_info_hashes = set()
 
         self._periodic_tasks.append(PeriodicTaskInfo(self._full_update, params.INTERVAL_FULL_UPDATE))
+        self._periodic_tasks.append(PeriodicTaskInfo(self._quick_update, params.INTERVAL_QUICK_UPDATE))
         self._periodic_tasks.append(PeriodicTaskInfo(self._session_update, params.INTERVAL_SESSION_UPDATE))
 
     @property
@@ -57,12 +62,11 @@ class BaseTransmission(Manager):
         self._session_stats = TransmissionSessionStats(session_stats)
         self._peer_port = session_stats.peer_port
 
-    async def _full_update(self):
-        logger.debug('Starting full update for {}'.format(self._name))
-        start = timezone_now()
+    async def __update_torrents(self, info_hashes):
+        requested_info_hashes = set(info_hashes) if info_hashes is not None else set(self._torrent_states.keys())
 
         await self._executor.ensure_client(self._launch_deadline)
-        t_torrents = await self._executor.fetch_torrents()
+        t_torrents = await self._executor.fetch_torrents(list(info_hashes) if info_hashes is not None else None)
 
         received_info_hashes = set()
         for t_torrent in t_torrents:
@@ -74,9 +78,17 @@ class BaseTransmission(Manager):
 
             self._register_t_torrent_update(t_torrent)
 
-        removed_info_hashes = set(self._torrent_states.keys()) - received_info_hashes
+        removed_info_hashes = requested_info_hashes - received_info_hashes
         for removed_info_hash in removed_info_hashes:
             self._register_t_torrent_delete(removed_info_hash)
+
+        return received_info_hashes
+
+    async def _full_update(self):
+        logger.debug('Starting full update for {}'.format(self._name))
+        start = timezone_now()
+
+        received_info_hashes = await self.__update_torrents(None)
 
         # Keep items in _deleted_info_hashes that are still being received
         self._deleted_info_hashes = self._deleted_info_hashes.intersection(received_info_hashes)
@@ -85,6 +97,18 @@ class BaseTransmission(Manager):
             self._initialize_time_seconds = (timezone_now() - self._launch_datetime).total_seconds()
             self._initialized = True
         self._last_full_update_seconds = (timezone_now() - start).total_seconds()
+
+    async def _quick_update(self):
+        logger.debug('Quick update hashes: {}'.format(self._quick_update_info_hashes))
+        if not self._quick_update_info_hashes:
+            return
+
+        logger.debug('Starting quick update for {}'.format(self._name))
+        start = timezone_now()
+
+        await self.__update_torrents(self._quick_update_info_hashes)
+
+        self._last_quick_update_seconds = (timezone_now() - start).total_seconds()
 
     def get_info_dict(self):
         data = super().get_info_dict()
@@ -96,6 +120,7 @@ class BaseTransmission(Manager):
         data = super().get_debug_dict()
         data.update({
             'last_full_update_seconds': self._last_full_update_seconds,
+            'last_quick_update_seconds': self._last_quick_update_seconds,
         })
         return data
 
@@ -104,25 +129,42 @@ class BaseTransmission(Manager):
             torrent_state = self._torrent_states[t_torrent.hashString]
             if torrent_state.update_from_t_torrent(t_torrent):
                 self._orchestrator.on_torrent_updated(torrent_state)
-            return torrent_state
         else:
             torrent_state = TransmissionTorrentState(self, t_torrent)
             self._torrent_states[torrent_state.info_hash] = torrent_state
             self._orchestrator.on_torrent_added(torrent_state)
-            return torrent_state
+
+        if torrent_state.should_quick_update:
+            torrent_state.last_quick_update = timezone_now()
+            logger.debug('Add torrent {} for quick updating.'.format(torrent_state.info_hash))
+            self._quick_update_info_hashes.add(torrent_state.info_hash)
+        elif torrent_state.info_hash in self._quick_update_info_hashes:
+            secs_since_last = (timezone_now() - torrent_state.last_quick_update).total_seconds()
+            if secs_since_last > params.QUICK_UPDATE_TIMEOUT:
+                logger.debug('Remove torrent {} from quick updating.'.format(torrent_state.info_hash))
+                self._quick_update_info_hashes.remove(torrent_state.info_hash)
+
+        return torrent_state
 
     def _register_t_torrent_delete(self, info_hash):
-        del self._torrent_states[info_hash]
-        self._orchestrator.on_torrent_removed(self, info_hash)
+        if info_hash in self._torrent_states:
+            del self._torrent_states[info_hash]
+            self._quick_update_info_hashes.discard(info_hash)
+            self._orchestrator.on_torrent_removed(self, info_hash)
 
-    async def add_torrent(self, torrent, download_path):
+    async def add_torrent(self, torrent, download_path, name):
         if not self._initialized:
             message = 'Unable to add torrent in {}: not fully started up yet.'.format(self._name)
             logger.error(message)
             raise Exception(message)
 
         logger.info('Adding torrent in {}'.format(self._name))
-        t_torrent = await self._executor.add_torrent(torrent, download_path)
+        t_torrent = await self._executor.add_torrent(torrent, download_path, name)
+        info_hash = t_torrent.hashString
+
+        self._deleted_info_hashes.discard(info_hash)
+        logger.debug('Adding new torrent {} for quick update.'.format(info_hash))
+        self._quick_update_info_hashes.add(info_hash)
         return self._register_t_torrent_update(t_torrent)
 
     async def delete_torrent(self, info_hash):

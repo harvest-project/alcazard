@@ -78,7 +78,7 @@ class AlcazarOrchestrator:
         instance = self._load_manager_for_config(manager, instance_config)
         return instance
 
-    async def add_torrent(self, realm, torrent, download_path):
+    async def add_torrent(self, realm, torrent, download_path, name):
         logger.info('Adding torrent to realm {}'.format(realm))
         # Get the managers that we're interested in (chosen realm)
         realm_managers = self.managers_by_realm[realm.id]
@@ -88,7 +88,7 @@ class AlcazarOrchestrator:
         torrent_counts = Counter(self.realm_info_hash_to_manager[realm.id].values())
         # Choose the manager with the smallest count from torrent_counts
         manager = min(realm_managers, key=lambda m: torrent_counts.get(m, 0))
-        return await manager.add_torrent(torrent, download_path)
+        return await manager.add_torrent(torrent, download_path, name)
 
     async def delete_torrent(self, realm, info_hash):
         logger.info('Deleting torrent {} from realm {}'.format(info_hash, realm))

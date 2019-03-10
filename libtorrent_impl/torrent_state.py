@@ -22,8 +22,9 @@ class LibtorrentTorrentState(TorrentState):
         FieldInfo('size', 'total_wanted'),
         FieldInfo('downloaded', 'all_time_download'),
         FieldInfo('uploaded', 'all_time_upload'),
-        FieldInfo('download_rate', 'download_payload_rate'),
-        FieldInfo('upload_rate', 'upload_payload_rate'),
+        # Work around weird issue where libtorrent returns 1 byte/s for a long time
+        FieldInfo('download_rate', 'download_payload_rate', converter=lambda i: i if i > 1 else 0),
+        FieldInfo('upload_rate', 'upload_payload_rate', converter=lambda i: i if i > 1 else 0),
         FieldInfo('progress', 'progress'),
         FieldInfo('date_added', None, converter=lambda _: None),
         FieldInfo('error', 'error', converter=lambda i: i or None),

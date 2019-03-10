@@ -1,14 +1,13 @@
 import asyncio
 import base64
 import logging
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 
 import transmissionrpc
 
 from transmission.params import TRANSMISSION_FETCH_ARGS
-from utils import TorrentFileInfo, timezone_now
+from utils import timezone_now
 
 logger = logging.getLogger(__name__)
 
@@ -50,29 +49,27 @@ class TransmissionAsyncExecutor:
     async def ensure_client(self, deadline):
         return await asyncio.wrap_future(self._thread_pool.submit(self._ensure_client, deadline))
 
-    def _fetch_torrents(self):
+    def _fetch_torrents(self, ids):
         logger.debug('Fetching torrents from {}:{}'.format(self._host, self._port))
-        return self._client.get_torrents(arguments=TRANSMISSION_FETCH_ARGS)
+        return self._client.get_torrents(ids=ids, arguments=TRANSMISSION_FETCH_ARGS)
 
-    async def fetch_torrents(self):
-        return await asyncio.wrap_future(self._thread_pool.submit(self._fetch_torrents))
+    async def fetch_torrents(self, ids):
+        return await asyncio.wrap_future(self._thread_pool.submit(self._fetch_torrents, ids))
 
-    def _add_torrent(self, torrent, download_path):
+    def _add_torrent(self, torrent, download_path, name):
         logger.debug('Adding torrent to {}:{}'.format(self._host, self._port))
         base64_torrent = base64.b64encode(torrent).decode()
-        torrent_file_info = TorrentFileInfo(torrent)
-        if torrent_file_info.files is not None:
-            # Multi-file torrent, that we'll need to rename after adding. If the destination is /a/b/c, we'll add it
-            # to /a/b. Transmission will create /a/b/<torrent_name> and then we rename <torrent_name> to c.
+        if name is not None:
+            # Need to rename the torrent as specified in the request
             bootstrap_t_torrent = self._client.add_torrent(
                 base64_torrent,
-                download_dir=os.path.dirname(download_path),
+                download_dir=download_path,
                 paused=True,
             )
             self._client.rename_torrent_path(
                 bootstrap_t_torrent.id,
-                torrent_file_info.name,
-                os.path.basename(download_path),
+                bootstrap_t_torrent.name,
+                name,
             )
             self._client.start_torrent([bootstrap_t_torrent.id])
         else:
@@ -85,8 +82,9 @@ class TransmissionAsyncExecutor:
         # Get the full object with all fields by the torrent id
         return self._client.get_torrent(bootstrap_t_torrent.id, arguments=TRANSMISSION_FETCH_ARGS)
 
-    async def add_torrent(self, torrent, download_path):
-        return await asyncio.wrap_future(self._thread_pool.submit(self._add_torrent, torrent, download_path))
+    async def add_torrent(self, torrent, download_path, name):
+        return await asyncio.wrap_future(self._thread_pool.submit(
+            self._add_torrent, torrent, download_path, name))
 
     def _delete_torrent(self, t_id):
         logger.debug('Deleting torrent {} from {}:{}'.format(t_id, self._host, self._port))

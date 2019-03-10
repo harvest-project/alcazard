@@ -1,7 +1,10 @@
 from clients import TorrentState
 
-INTERVAL_FULL_UPDATE = 10
+INTERVAL_FULL_UPDATE = 300
+INTERVAL_QUICK_UPDATE = 3
 INTERVAL_SESSION_UPDATE = 3
+
+QUICK_UPDATE_TIMEOUT = 30
 
 DEFAULT_TRANSMISSION_SETTINGS_TEMPLATE = {
     'peer-limit-global': 1000,
@@ -27,4 +30,10 @@ STATUS_MAPPING = {
     'downloading': TorrentState.STATUS_DOWNLOADING,
     'seed pending': TorrentState.STATUS_STOPPED,
     'seeding': TorrentState.STATUS_SEEDING,
+}
+
+QUICK_UPDATE_STATUSES = {
+    TorrentState.STATUS_CHECK_WAITING,
+    TorrentState.STATUS_CHECKING,
+    TorrentState.STATUS_DOWNLOADING,
 }

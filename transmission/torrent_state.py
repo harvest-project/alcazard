@@ -1,4 +1,5 @@
 from clients import TorrentState, FieldInfo
+from transmission import params
 from transmission.params import STATUS_MAPPING
 from utils import extract_name_from_announce
 
@@ -36,7 +37,12 @@ class TransmissionTorrentState(TorrentState):
     def __init__(self, manager, t_torrent):
         super().__init__(manager, t_torrent.hashString)
         self.transmission_id = t_torrent.id
+        self.last_quick_update = None
         self.update_from_t_torrent(t_torrent)
+
+    @property
+    def should_quick_update(self):
+        return self.status in params.QUICK_UPDATE_STATUSES or self.upload_rate or self.download_rate
 
     def update_from_t_torrent(self, t_torrent):
         return self._sync_fields(t_torrent)
