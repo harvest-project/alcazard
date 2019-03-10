@@ -102,6 +102,7 @@ class TorrentState:
             'info_hash': self.info_hash,
             'error': self.error,
             'realm': self.manager.instance_config.realm.name,
+            'client': self.manager.name,
         })
         return result
 

@@ -10,7 +10,6 @@ import libtorrent
 from clients import Manager, PeriodicTaskInfo, TorrentAlreadyAddedException
 from error_manager import Severity
 from libtorrent_impl import params
-from libtorrent_impl.params import POST_UPDATES_INTERVAL, SAVE_RESUME_DATA_INTERVAL, UPDATE_SESSION_STATS_INTERVAL
 from libtorrent_impl.session_stats import LibtorrentSessionStats
 from libtorrent_impl.torrent_state import LibtorrentTorrentState
 from libtorrent_impl.utils import format_libtorrent_endpoint, LibtorrentClientException
@@ -48,10 +47,11 @@ class ManagedLibtorrent(Manager):
         self.start_total_downloaded = instance_config.total_downloaded
         self.start_total_uploaded = instance_config.total_uploaded
 
-        self._periodic_tasks.append(PeriodicTaskInfo(self._post_torrent_updates, POST_UPDATES_INTERVAL))
-        self._save_resume_data_task = PeriodicTaskInfo(self._periodic_resume_save, SAVE_RESUME_DATA_INTERVAL)
+        self._periodic_tasks.append(PeriodicTaskInfo(self._post_torrent_updates, params.POST_UPDATES_INTERVAL))
+        self._save_resume_data_task = PeriodicTaskInfo(self._periodic_resume_save, params.SAVE_RESUME_DATA_INTERVAL)
         self._periodic_tasks.append(self._save_resume_data_task)
-        self._periodic_tasks.append(PeriodicTaskInfo(self._update_session_stats, UPDATE_SESSION_STATS_INTERVAL))
+        self._periodic_tasks.append(
+            PeriodicTaskInfo(self._update_session_stats_async, params.UPDATE_SESSION_STATS_INTERVAL))
 
     @property
     def peer_port(self):
@@ -90,9 +90,9 @@ class ManagedLibtorrent(Manager):
     async def _load_initial_torrents(self):
         start = time.time()
         ids = list(LibtorrentTorrent.select(LibtorrentTorrent.id).tuples())
-        for batch in chunks(ids, 100):
+        for batch in chunks(ids, params.INITIAL_TORRENT_LOAD_BATCH_SIZE):
             await self.__load_initial_torrents(batch)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(params.INITIAL_TORRENT_LOAD_BATCH_SLEEP)
         logger.info('Completed initial torrent load in {}.'.format(time.time() - start))
 
     async def _loop(self):
@@ -101,7 +101,7 @@ class ManagedLibtorrent(Manager):
 
             try:
                 await self._run_periodic_tasks()
-                self._process_alerts()
+                await self._process_alerts_async()
             except CancelledError:
                 break
             except Exception:
@@ -114,8 +114,8 @@ class ManagedLibtorrent(Manager):
                 logger.exception('Loop crashed')
 
             time_taken = time.time() - start
-            if time_taken > 0.1:
-                logger.info('Libtorrent slow loop for {} took {:.3f}'.format(self._name, time_taken))
+            if time_taken > params.SLOW_LOOP_THRESHOLD:
+                logger.warning('Libtorrent slow loop for {} took {:.3f}'.format(self._name, time_taken))
             await asyncio.sleep(max(0, params.LOOP_INTERVAL - time_taken))
 
     def _on_alert_torrent_finished(self, alert):
@@ -224,11 +224,12 @@ class ManagedLibtorrent(Manager):
 
     def __torrent_handle_added(self, handle, *, torrent_file=None, download_path=None):
         """
+        Executed either form an alert or from synchronous torrent add to update internal state for the new torrent.
 
         :param info_hash: info_hash of the added torrent
         :param handle: libtorrent.torrent_handle of the added torrent
         :param torrent_file: Only passed during the initial add, so that the LibtorrenTorrent can be created
-        :return:
+        :return: The LibtorrentTorrentState of the newly added torrent
         """
         info_hash = str(handle.info_hash())
         db_torrent = self._libtorrent_torrent_by_info_hash.pop(info_hash, None)
@@ -259,19 +260,32 @@ class ManagedLibtorrent(Manager):
         del self._torrent_states[info_hash]
         self._orchestrator.on_torrent_removed(self, info_hash)
 
-    def _process_alerts(self, allow_sleep=True):
+    def _process_alerts_sync(self):
         alerts = self._session.pop_alerts()
         if not len(alerts):
             return
         logging.info('Received {} alerts'.format(len(alerts)))
         for alerts_batch in chunks(alerts, 5000):
-            logging.debug('Processing batch of {} alerts'.format(len(alerts_batch)))
-            with DB.atomic():
-                self.__process_alerts(alerts_batch)
-            if allow_sleep:
-                await asyncio.sleep(0.05)  # Sleep between alert batches to allow other processing
+            self.__process_alerts(alerts_batch)
 
+    async def _process_alerts_async(self):
+        """
+        Like _process_alerts but adds async sleep between batches, so we leave time for other tasks on the event loop
+        in case of large alert batches, like saving resume files.
+        """
+
+        alerts = self._session.pop_alerts()
+        if not len(alerts):
+            return
+        logging.info('Received {} alerts'.format(len(alerts)))
+        for alerts_batch in chunks(alerts, params.ALERT_BATCH_SIZE):
+            self.__process_alerts(alerts_batch)
+            await asyncio.sleep(0.1)
+
+    @DB.atomic()
     def __process_alerts(self, alerts):
+        logging.debug('Processing batch of {} alerts'.format(len(alerts)))
+
         for a in alerts:
             try:
                 # print(type(a))
@@ -318,7 +332,7 @@ class ManagedLibtorrent(Manager):
     async def _periodic_resume_save(self):
         self._save_torrents_resume_data(None, False)
 
-    async def _update_session_stats(self):
+    async def _update_session_stats_async(self):
         self._update_session_stats_sync()
 
     def _update_session_stats_sync(self):
@@ -350,7 +364,7 @@ class ManagedLibtorrent(Manager):
         logger.debug('Waiting for save resume data to complete. Running alert poll loop.')
         wait_start = time.time()
         while self._info_hashes_waiting_for_resume_data_save:
-            self._process_alerts(allow_sleep=False)  # Process as fast as possible
+            self._process_alerts_sync()  # Process as fast as possible
             time.sleep(params.LOOP_INTERVAL)
             if time.time() - wait_start > params.SHUTDOWN_TIMEOUT:
                 raise LibtorrentClientException('Shutdown timeout reached.')

@@ -17,11 +17,18 @@ DHT_BOOTSTRAP_NODES = [
     'dht.aelitis.com:6881',
 ]
 
-LOOP_INTERVAL = 0.1
+LOOP_INTERVAL = 0.1  # Interval in seconds between loop iterations (popping alerts)
+SLOW_LOOP_THRESHOLD = 0.5  # Slower loops than this many seconds emits a warning
 POST_UPDATES_INTERVAL = 3  # Post updates every 3 minutes
 SAVE_RESUME_DATA_INTERVAL = 15 * 60  # Save resume data for all torrents (that need it) every 15 minutes
-UPDATE_SESSION_STATS_INTERVAL = 3
-SHUTDOWN_TIMEOUT = 30
+UPDATE_SESSION_STATS_INTERVAL = 3  # Interval in seconds for updating session stats
+SHUTDOWN_TIMEOUT = 60  # Seconds to wait for alerts during shutdown to be processed
+
+INITIAL_TORRENT_LOAD_BATCH_SIZE = 100  # Number of torrent in a batch when loading initial torrents into the session
+INITIAL_TORRENT_LOAD_BATCH_SLEEP = 0.1  # Seconds to sleep between loading initial torrent batches
+
+ALERT_BATCH_SIZE = 5000  # Alerts in a single processing batch transaction
+ALERT_BATCH_SLEEP = 0.1  # Seconds to sleep between batches of ALERT_BATCH_SIZE to free up the event loop
 
 
 def get_session_settings(peer_port, enable_dht):
