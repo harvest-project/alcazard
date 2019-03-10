@@ -211,7 +211,7 @@ class Manager(ABC):
                 if ran:
                     self._error_manager.clear_error(task.fn.__name__)
             except CancelledError:
-                return
+                raise
             except Exception:
                 message = 'Periodic task {} running every {}s crashed'.format(
                     task.fn.__name__, task.interval_seconds)
