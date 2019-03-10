@@ -126,6 +126,17 @@ class AlcazarOrchestrator:
             del self.pooled_updates[info_hash]
         self.pooled_removes.add((realm.name, info_hash))
 
-    def clear_pooled_events(self):
-        self.pooled_updates.clear()
+    def pop_pooled_updates(self, limit):
+        if limit >= len(self.pooled_updates):
+            updates = list(self.pooled_updates.values())
+            self.pooled_updates.clear()
+        else:
+            updates = []
+            for _ in range(limit):
+                updates.append(self.pooled_updates.popitem()[1])
+        return updates
+
+    def pop_pooled_removes(self):
+        removes = list(self.pooled_removes)
         self.pooled_removes.clear()
+        return removes

@@ -92,7 +92,7 @@ def extract_name_from_announce(announce):
     try:
         parsed_url = urllib.parse.urlparse(announce)
         name = parsed_url.netloc
-    except Exception:
+    except ValueError:
         name = announce
 
     _ANNOUNCE_TO_NAME_CACHE[announce] = name

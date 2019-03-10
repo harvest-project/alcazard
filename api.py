@@ -113,11 +113,9 @@ class AlcazarAPI:
 
     @jsonify_exceptions
     async def post_pop_updates(self, request):
-        max_updates = request.query.get('max_updates', 10000)
-        # TODO: Implement max_updates
-        updated_dicts = list(self.orchestrator.pooled_updates.values())
-        removed_hashes = list(self.orchestrator.pooled_removes)
-        self.orchestrator.clear_pooled_events()
+        limit = request.query.get('limit', 10000)
+        updated_dicts = self.orchestrator.pop_pooled_updates(limit)
+        removed_hashes = self.orchestrator.pop_pooled_removes()
         return JsonResponse({
             'updated': updated_dicts,
             'removed': removed_hashes,

@@ -315,6 +315,8 @@ class ManagedLibtorrent(Manager):
                     self._on_alert_torrent_removed(a)
                 elif isinstance(a, libtorrent.session_stats_alert):
                     self._on_alert_session_stats(a)
+            except CancelledError:
+                break
             except Exception:
                 alert_type_name = type(a).__name__
                 message = 'Error processing alert of type {}'.format(alert_type_name)
