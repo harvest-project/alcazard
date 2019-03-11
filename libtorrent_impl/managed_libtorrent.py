@@ -3,7 +3,7 @@ import logging
 import time
 import traceback
 from asyncio import CancelledError
-from collections import Counter
+from collections import Counter, defaultdict
 
 import libtorrent
 
@@ -18,6 +18,20 @@ from models import ManagedLibtorrentConfig, LibtorrentTorrent, DB
 from utils import chunks, timezone_now
 
 logger = BraceAdapter(logging.getLogger(__name__))
+
+
+def alert_cb_profile(fn):
+    def inner(self, alert):
+        name = fn.__name__
+        start = time.time()
+        fn(self, alert)
+        self._alert_counts[name] += 1
+        self._alert_cumul_time[name] += time.time() - start
+
+    if __debug__:
+        return inner
+    else:
+        return fn
 
 
 class ManagedLibtorrent(Manager):
@@ -53,6 +67,9 @@ class ManagedLibtorrent(Manager):
         self._periodic_tasks.append(self._save_resume_data_task)
         self._periodic_tasks.append(
             PeriodicTaskInfo(self._update_session_stats_async, params.UPDATE_SESSION_STATS_INTERVAL))
+
+        self._alert_counts = defaultdict(int)
+        self._alert_cumul_time = defaultdict(int)
 
     @property
     def peer_port(self):
@@ -127,6 +144,7 @@ class ManagedLibtorrent(Manager):
                 logger.warning('Libtorrent slow loop for {} took {:.3f}', self._name, time_taken)
             await asyncio.sleep(max(0, params.LOOP_INTERVAL - time_taken))
 
+    @alert_cb_profile
     def _on_alert_torrent_finished(self, alert):
         status = alert.handle.status()
         info_hash = str(status.info_hash)
@@ -144,6 +162,7 @@ class ManagedLibtorrent(Manager):
         if status.total_payload_download:
             self._save_torrents_resume_data([torrent_state], True)
 
+    @alert_cb_profile
     def _on_alert_state_update(self, alert):
         for status in alert.status:
             info_hash = str(status.info_hash)
@@ -156,6 +175,7 @@ class ManagedLibtorrent(Manager):
     def __on_resume_data_completed(self, info_hash):
         self._info_hashes_waiting_for_resume_data_save.discard(info_hash)
 
+    @alert_cb_profile
     def _on_alert_tracker_announce(self, alert):
         info_hash = str(alert.handle.info_hash())
         if __debug__:
@@ -168,6 +188,7 @@ class ManagedLibtorrent(Manager):
             return
         torrent_state.tracker_state = LibtorrentTorrentState.TRACKER_ANNOUNCING
 
+    @alert_cb_profile
     def _on_alert_tracker_reply(self, alert):
         info_hash = str(alert.handle.info_hash())
         if __debug__:
@@ -181,6 +202,7 @@ class ManagedLibtorrent(Manager):
         if torrent_state.update_tracker_success():
             self._orchestrator.on_torrent_updated(torrent_state)
 
+    @alert_cb_profile
     def _on_alert_tracker_error(self, alert):
         info_hash = str(alert.handle.info_hash())
         if __debug__:
@@ -194,6 +216,7 @@ class ManagedLibtorrent(Manager):
         if torrent_state.update_tracker_error(alert):
             self._orchestrator.on_torrent_updated(torrent_state)
 
+    @alert_cb_profile
     def _on_alert_save_resume_data(self, alert):
         info_hash = str(alert.handle.info_hash())
         if __debug__:
@@ -206,6 +229,7 @@ class ManagedLibtorrent(Manager):
         # Save memory after save, since we'll not need that at all
         torrent_state.db_torrent.resume_data = None
 
+    @alert_cb_profile
     def _on_alert_save_resume_data_failed(self, alert):
         info_hash = str(alert.handle.info_hash())
         logger.error('Received fast resume data FAILED for {}', info_hash)
@@ -234,14 +258,17 @@ class ManagedLibtorrent(Manager):
         if __debug__:
             logger.debug('Skipped saving resume data for {} torrents - not needed.', skipped)
 
+    @alert_cb_profile
     def _on_alert_listen_succeeded(self, alert):
         key, _ = format_libtorrent_endpoint(alert.endpoint)
         self._error_manager.clear_error(key, convert_errors_to_warnings=False)
 
+    @alert_cb_profile
     def _on_alert_listen_failed(self, alert):
         key, readable_name = format_libtorrent_endpoint(alert.endpoint)
         self._error_manager.add_error(Severity.ERROR, key, 'Failed to listen on {}'.format(readable_name))
 
+    @alert_cb_profile
     def _on_alert_session_stats(self, alert):
         self._metrics = dict(alert.values)
 
@@ -277,6 +304,7 @@ class ManagedLibtorrent(Manager):
         self._orchestrator.on_torrent_added(torrent_state)
         return torrent_state
 
+    @alert_cb_profile
     def _on_alert_torrent_added(self, alert):
         handle = alert.handle
         info_hash = str(handle.info_hash())
@@ -285,6 +313,7 @@ class ManagedLibtorrent(Manager):
         if info_hash not in self._torrent_states:
             self.__torrent_handle_added(handle)
 
+    @alert_cb_profile
     def _on_alert_torrent_removed(self, alert):
         info_hash = str(alert.info_hash)
         torrent_state = self._torrent_states[info_hash]
@@ -297,8 +326,8 @@ class ManagedLibtorrent(Manager):
         if not len(alerts):
             return
         logger.info('Received {} alerts', len(alerts))
-        for alerts_batch in chunks(alerts, 5000):
-            self.__process_alerts(alerts_batch)
+        for alerts_batch in chunks(alerts, params.ALERT_BATCH_SIZE):
+            self._process_alerts_batch(alerts_batch)
 
     async def _process_alerts_async(self):
         """
@@ -311,11 +340,11 @@ class ManagedLibtorrent(Manager):
             return
         logger.info('Received {} alerts', len(alerts))
         for alerts_batch in chunks(alerts, params.ALERT_BATCH_SIZE):
-            self.__process_alerts(alerts_batch)
+            self._process_alerts_batch(alerts_batch)
             await asyncio.sleep(params.ALERT_BATCH_SLEEP)
 
     @DB.atomic()
-    def __process_alerts(self, alerts):
+    def _process_alerts_batch(self, alerts):
         if __debug__:
             logger.debug('Processing batch of {} alerts', len(alerts))
 
@@ -326,10 +355,11 @@ class ManagedLibtorrent(Manager):
                 # print(a.message())
                 # print()
 
+                # Sort list by performance
                 if isinstance(a, libtorrent.state_update_alert):
                     self._on_alert_state_update(a)
-                elif isinstance(a, libtorrent.torrent_finished_alert):
-                    self._on_alert_torrent_finished(a)
+                elif isinstance(a, libtorrent.torrent_added_alert):
+                    self._on_alert_torrent_added(a)
                 elif isinstance(a, libtorrent.tracker_announce_alert):
                     self._on_alert_tracker_announce(a)
                 elif isinstance(a, libtorrent.tracker_reply_alert):
@@ -338,16 +368,16 @@ class ManagedLibtorrent(Manager):
                     self._on_alert_tracker_error(a)
                 elif isinstance(a, libtorrent.save_resume_data_alert):
                     self._on_alert_save_resume_data(a)
-                elif isinstance(a, libtorrent.torrent_added_alert):
-                    self._on_alert_torrent_added(a)
-                elif isinstance(a, libtorrent.listen_succeeded_alert):
-                    self._on_alert_listen_succeeded(a)
-                elif isinstance(a, libtorrent.listen_failed_alert):
-                    self._on_alert_listen_failed(a)
+                elif isinstance(a, libtorrent.torrent_finished_alert):
+                    self._on_alert_torrent_finished(a)
                 elif isinstance(a, libtorrent.torrent_removed_alert):
                     self._on_alert_torrent_removed(a)
                 elif isinstance(a, libtorrent.session_stats_alert):
                     self._on_alert_session_stats(a)
+                elif isinstance(a, libtorrent.listen_succeeded_alert):
+                    self._on_alert_listen_succeeded(a)
+                elif isinstance(a, libtorrent.listen_failed_alert):
+                    self._on_alert_listen_failed(a)
             except CancelledError:
                 break
             except Exception:
@@ -438,6 +468,8 @@ class ManagedLibtorrent(Manager):
             'torrent_tracker_statuses': Counter([_get_tracker_status(ts) for ts in self._torrent_states.values()]),
             'metrics': self._metrics,
             'settings': dict(sorted(self._session.get_settings().items())),
+            'alert_counts': self._alert_counts,
+            'alert_cumul_time': self._alert_cumul_time,
         })
         return data
 
