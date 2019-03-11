@@ -81,6 +81,7 @@ def get_session_settings(peer_port, enable_dht):
 ERROR_KEY_LOOP = 'loop'
 ERROR_KEY_ALERT_PROCESSING = 'alert_processing_{}'
 ERROR_KEY_PERIODIC_TASKS = 'periodic_tasks'
+ERROR_KEY_ALREADY_ADDED = 'torrent_already_added'
 
 STATUS_MAPPING = {
     0: TorrentState.STATUS_CHECK_WAITING,  # queued_for_checking
@@ -92,3 +93,26 @@ STATUS_MAPPING = {
     6: TorrentState.STATUS_DOWNLOADING,  # allocating
     7: TorrentState.STATUS_CHECKING,  # checking_resume_data
 }
+
+
+def get_torrent_add_params(torrent, download_path, name, resume_data):
+    lt_torrent_info = libtorrent.torrent_info(libtorrent.bdecode(torrent))
+
+    if name is not None:
+        files = lt_torrent_info.files()
+        files.set_name(name)
+
+    add_params = {
+        'ti': lt_torrent_info,
+        'save_path': download_path,
+        'storage_mode': libtorrent.storage_mode_t.storage_mode_sparse,
+        'paused': False,
+        'auto_managed': True,
+        'duplicate_is_error': True,
+        'flags': libtorrent.add_torrent_params_flags_t.default_flags |
+                 libtorrent.add_torrent_params_flags_t.flag_update_subscribe,
+    }
+    if resume_data:
+        add_params['resume_data'] = resume_data
+
+    return add_params

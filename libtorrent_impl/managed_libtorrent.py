@@ -92,7 +92,7 @@ class ManagedLibtorrent(Manager):
         asyncio.ensure_future(self._loop())
         asyncio.ensure_future(self._load_initial_torrents())
 
-    async def __load_initial_torrents(self, id_batch):
+    def __load_initial_torrents(self, id_batch):
         if __debug__:
             logger.debug('Loading initial batch of {} torrents.', len(id_batch))
 
@@ -117,7 +117,7 @@ class ManagedLibtorrent(Manager):
         ids = list(LibtorrentTorrent.select(LibtorrentTorrent.id).tuples())
         self._initial_torrents_remaining = len(ids)
         for batch in chunks(ids, params.INITIAL_TORRENT_LOAD_BATCH_SIZE):
-            await self.__load_initial_torrents(batch)
+            self.__load_initial_torrents(batch)
             await asyncio.sleep(params.INITIAL_TORRENT_LOAD_BATCH_SLEEP)
         logger.info('Completed initial torrent load in {}.', time.time() - start)
 
@@ -164,10 +164,11 @@ class ManagedLibtorrent(Manager):
 
     @alert_cb_profile
     def _on_alert_state_update(self, alert):
+        logger.info('Received state updates for {} torrents.', len(alert.status))
         for status in alert.status:
             info_hash = str(status.info_hash)
             if __debug__:
-                logger.debug('Update state update for {}', status.info_hash)
+                logger.debug('Update state update for {}.', status.info_hash)
             torrent_state = self._torrent_states[info_hash]
             if torrent_state.update_from_status(status):
                 self._orchestrator.on_torrent_updated(torrent_state)
@@ -272,7 +273,7 @@ class ManagedLibtorrent(Manager):
     def _on_alert_session_stats(self, alert):
         self._metrics = dict(alert.values)
 
-    def __torrent_handle_added(self, handle, *, torrent_file=None, download_path=None):
+    def __torrent_handle_added(self, status, *, torrent_file=None, download_path=None):
         """
         Executed either form an alert or from synchronous torrent add to update internal state for the new torrent.
 
@@ -281,7 +282,7 @@ class ManagedLibtorrent(Manager):
         :param torrent_file: Only passed during the initial add, so that the LibtorrenTorrent can be created
         :return: The LibtorrentTorrentState of the newly added torrent
         """
-        info_hash = str(handle.info_hash())
+        info_hash = str(status.info_hash)
         db_torrent = self._libtorrent_torrent_by_info_hash.pop(info_hash, None)
 
         completed_loading = (
@@ -295,7 +296,7 @@ class ManagedLibtorrent(Manager):
 
         torrent_state = LibtorrentTorrentState(
             manager=self,
-            handle=handle,
+            status=status,
             torrent_file=torrent_file,
             download_path=download_path,
             db_torrent=db_torrent,
@@ -304,14 +305,18 @@ class ManagedLibtorrent(Manager):
         self._orchestrator.on_torrent_added(torrent_state)
         return torrent_state
 
-    @alert_cb_profile
     def _on_alert_torrent_added(self, alert):
-        handle = alert.handle
-        info_hash = str(handle.info_hash())
+        status = alert.handle.status()
         if __debug__:
+            info_hash = str(status.info_hash)
             logger.debug('Received torrent_added for {}', info_hash)
-        if info_hash not in self._torrent_states:
-            self.__torrent_handle_added(handle)
+        if info_hash in self._torrent_states:
+            self._error_manager.add_error(
+                severity=Severity.ERROR,
+                key=params.ERROR_KEY_ALREADY_ADDED,
+                message='Got alert_torrent_added, but torrent is already in _torrent_states',
+            )
+        self.__torrent_handle_added(status)
 
     @alert_cb_profile
     def _on_alert_torrent_removed(self, alert):
@@ -355,7 +360,7 @@ class ManagedLibtorrent(Manager):
                 # print(a.message())
                 # print()
 
-                # Sort list by performance
+                # Sort list by frequency for performance
                 if isinstance(a, libtorrent.state_update_alert):
                     self._on_alert_state_update(a)
                 elif isinstance(a, libtorrent.torrent_added_alert):
@@ -474,33 +479,17 @@ class ManagedLibtorrent(Manager):
         return data
 
     def _add_torrent(self, torrent, download_path, name, *, async_add, resume_data):
-        lt_torrent_info = libtorrent.torrent_info(libtorrent.bdecode(torrent))
-
-        if name is not None:
-            files = lt_torrent_info.files()
-            files.set_name(name)
-
-        add_params = {
-            'ti': lt_torrent_info,
-            'save_path': download_path,
-            'storage_mode': libtorrent.storage_mode_t.storage_mode_sparse,
-            'paused': False,
-            'auto_managed': True,
-            'duplicate_is_error': True,
-            'flags': libtorrent.add_torrent_params_flags_t.default_flags |
-                     libtorrent.add_torrent_params_flags_t.flag_update_subscribe,
-        }
-        if resume_data:
-            add_params['resume_data'] = resume_data
+        add_params = params.get_torrent_add_params(torrent, download_path, name, resume_data)
 
         if async_add:
             self._session.async_add_torrent(add_params)
         else:
             handle = self._session.add_torrent(add_params)
-            if str(handle.info_hash()) in self._torrent_states:
+            status = handle.status()
+            if str(status.info_hash) in self._torrent_states:
                 raise TorrentAlreadyAddedException()
             torrent_state = self.__torrent_handle_added(
-                handle=handle,
+                status=status,
                 torrent_file=torrent,
                 download_path=download_path,
             )

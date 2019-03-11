@@ -30,12 +30,10 @@ class LibtorrentTorrentState(TorrentState):
         FieldInfo('state', 'state', converter=str, public=False),
     ]
 
-    def __init__(self, manager, handle, *, torrent_file=None, download_path=None, db_torrent=None):
-        status = handle.status()
-
+    def __init__(self, manager, status, *, torrent_file=None, download_path=None, db_torrent=None):
         super().__init__(manager, str(status.info_hash))
 
-        self.handle = handle
+        self.handle = status.handle
         self.state = None
         self.tracker_status = self.TRACKER_PENDING
 
@@ -44,7 +42,7 @@ class LibtorrentTorrentState(TorrentState):
         else:
             self.db_torrent = self._load_or_create_db_torrent(torrent_file, download_path)
 
-        self.update_from_status(handle.status())
+        self.update_from_status(status)
 
     def _load_or_create_db_torrent(self, torrent_file, download_path):
         try:

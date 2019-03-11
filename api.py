@@ -43,11 +43,11 @@ class AlcazarAPI:
         return JsonResponse(self.config.to_dict())
 
     @jsonify_exceptions
-    @DB.atomic()
     async def put_config(self, request):
         data = await request.json()
-        self.config.update_from_dict(data)
-        self.config.save()
+        with DB.atomic():
+            self.config.update_from_dict(data)
+            self.config.save()
         return JsonResponse(self.config.to_dict())
 
     @jsonify_exceptions
@@ -57,17 +57,17 @@ class AlcazarAPI:
         })
 
     @jsonify_exceptions
-    @DB.atomic()
     async def post_clients(self, request):
         data = await request.json()
-        realm = Realm.select().where(Realm.name == data['realm']).first()
-        if not realm:
-            realm = Realm.create(name=data['realm'])
-        instance = self.orchestrator.add_instance(
-            realm=realm,
-            instance_type=data['instance_type'],
-            config_kwargs=data.get('config', {}),
-        )
+        with DB.atomic():
+            realm = Realm.select().where(Realm.name == data['realm']).first()
+            if not realm:
+                realm = Realm.create(name=data['realm'])
+            instance = self.orchestrator.add_instance(
+                realm=realm,
+                instance_type=data['instance_type'],
+                config_kwargs=data.get('config', {}),
+            )
         return JsonResponse(instance.get_info_dict())
 
     @jsonify_exceptions
