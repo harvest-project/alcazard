@@ -89,7 +89,7 @@ class AlcazarAPI:
                 realm=realm,
                 torrent=base64.b64decode(data['torrent']),
                 download_path=data['download_path'],
-                name=data['name'],
+                name=data.get('name'),
             )
         except NoManagerForRealmException as exc:
             return JsonResponse({'detail': str(exc)}, status=400)

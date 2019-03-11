@@ -25,7 +25,7 @@ UPDATE_SESSION_STATS_INTERVAL = 3  # Interval in seconds for updating session st
 SHUTDOWN_TIMEOUT = 60  # Seconds to wait for alerts during shutdown to be processed
 
 INITIAL_TORRENT_LOAD_BATCH_SIZE = 500  # Number of torrent in a batch when loading initial torrents into the session
-INITIAL_TORRENT_LOAD_BATCH_SLEEP = 0.5  # Seconds to sleep between loading initial torrent batches
+INITIAL_TORRENT_LOAD_BATCH_SLEEP = 0.1  # Seconds to sleep between loading initial torrent batches
 
 ALERT_BATCH_SIZE = 5000  # Alerts in a single processing batch transaction
 ALERT_BATCH_SLEEP = 0.1  # Seconds to sleep between batches of ALERT_BATCH_SIZE to free up the event loop

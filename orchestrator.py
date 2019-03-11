@@ -3,10 +3,11 @@ import logging
 from asyncio import CancelledError
 from collections import defaultdict, Counter
 
+from alcazar_logging import BraceAdapter
 from clients import get_manager_types, TorrentNotFoundException
 from models import DB
 
-logger = logging.getLogger(__name__)
+logger = BraceAdapter(logging.getLogger(__name__))
 
 
 class NoManagerForRealmException(Exception):
@@ -34,7 +35,8 @@ class AlcazarOrchestrator:
 
     def attach(self):
         for manager_class in self.manager_types.values():
-            logger.debug('Launching managers for {}'.format(manager_class.__name__))
+            if __debug__:
+                logger.debug('Launching managers for {}', manager_class.__name__)
             config_type = manager_class.config_model
 
             for instance_config in config_type.select().order_by(config_type.id):
@@ -63,7 +65,8 @@ class AlcazarOrchestrator:
         logger.info('Clients are down.')
 
     def _load_manager_for_config(self, manager_class, instance_config):
-        logger.debug('Launching manager {} for config id={}'.format(manager_class.__name__, instance_config.id))
+        if __debug__:
+            logger.debug('Launching manager {} for config id={}', manager_class.__name__, instance_config.id)
         manager = manager_class(self, instance_config)
         manager.launch()
         self.managers[manager.name] = manager
@@ -72,14 +75,14 @@ class AlcazarOrchestrator:
 
     @DB.atomic()
     def add_instance(self, realm, instance_type, config_kwargs):
-        logger.info('Adding instance {} to realm {}'.format(instance_type, realm.name))
+        logger.info('Adding instance {} to realm {}', instance_type, realm.name)
         manager = self.manager_types[instance_type]
         instance_config = manager.config_model.create_new(realm=realm, **config_kwargs)
         instance = self._load_manager_for_config(manager, instance_config)
         return instance
 
     async def add_torrent(self, realm, torrent, download_path, name):
-        logger.info('Adding torrent to realm {}'.format(realm))
+        logger.info('Adding torrent to realm {}', realm)
         # Get the managers that we're interested in (chosen realm)
         realm_managers = self.managers_by_realm[realm.id]
         if not realm_managers:
@@ -91,15 +94,15 @@ class AlcazarOrchestrator:
         return await manager.add_torrent(torrent, download_path, name)
 
     async def delete_torrent(self, realm, info_hash):
-        logger.info('Deleting torrent {} from realm {}'.format(info_hash, realm))
+        logger.info('Deleting torrent {} from realm {}', info_hash, realm)
         manager = self.realm_info_hash_to_manager[realm.id].get(info_hash)
         if not manager:
             raise TorrentNotFoundException()
         await manager.delete_torrent(info_hash)
 
     def on_torrent_added(self, torrent_state):
-        logger.debug('Received torrent added from {} for {}'.format(
-            torrent_state.manager.name, torrent_state.info_hash))
+        if __debug__:
+            logger.debug('Received torrent added from {} for {}', torrent_state.manager.name, torrent_state.info_hash)
 
         realm_id = torrent_state.manager.instance_config.realm_id
         self.realm_info_hash_to_manager[realm_id][torrent_state.info_hash] = torrent_state.manager
@@ -107,8 +110,8 @@ class AlcazarOrchestrator:
         self.on_torrent_updated(torrent_state)
 
     def on_torrent_updated(self, torrent_state):
-        logger.debug('Received torrent update from {} for {}'.format(
-            torrent_state.manager.name, torrent_state.info_hash))
+        if __debug__:
+            logger.debug('Received torrent update from {} for {}', torrent_state.manager.name, torrent_state.info_hash)
 
         realm = torrent_state.manager.instance_config.realm
         self.pooled_updates[torrent_state.info_hash] = torrent_state.to_dict()
@@ -116,7 +119,8 @@ class AlcazarOrchestrator:
         self.pooled_removes.discard((realm.name, torrent_state.info_hash))
 
     def on_torrent_removed(self, manager, info_hash):
-        logger.debug('Received torrent delete from {} for {}'.format(manager.name, info_hash))
+        if __debug__:
+            logger.debug('Received torrent delete from {} for {}', manager.name, info_hash)
 
         realm = manager.instance_config.realm
 

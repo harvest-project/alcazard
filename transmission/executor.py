@@ -6,10 +6,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 import transmissionrpc
 
+from alcazar_logging import BraceAdapter
 from transmission.params import TRANSMISSION_FETCH_ARGS
 from utils import timezone_now
 
-logger = logging.getLogger(__name__)
+logger = BraceAdapter(logging.getLogger(__name__))
 
 
 class TransmissionAsyncExecutor:
@@ -23,7 +24,7 @@ class TransmissionAsyncExecutor:
         self._client = None
 
     def _obtain_client(self):
-        logger.debug('Trying to obtain client for {}:{}'.format(self._host, self._port))
+        logger.debug('Trying to obtain client for {}:{}', self._host, self._port)
         self._client = transmissionrpc.Client(
             address=self._host,
             port=self._port,
@@ -31,7 +32,7 @@ class TransmissionAsyncExecutor:
             password=self._password,
             timeout=60,
         )
-        logger.debug('Obtained client for {}:{}'.format(self._host, self._port))
+        logger.debug('Obtained client for {}:{}', self._host, self._port)
 
     def _ensure_client(self, datetime_deadline):
         if self._client:
@@ -50,14 +51,14 @@ class TransmissionAsyncExecutor:
         return await asyncio.wrap_future(self._thread_pool.submit(self._ensure_client, deadline))
 
     def _fetch_torrents(self, ids):
-        logger.debug('Fetching torrents from {}:{}'.format(self._host, self._port))
+        logger.debug('Fetching torrents from {}:{}', self._host, self._port)
         return self._client.get_torrents(ids=ids, arguments=TRANSMISSION_FETCH_ARGS)
 
     async def fetch_torrents(self, ids):
         return await asyncio.wrap_future(self._thread_pool.submit(self._fetch_torrents, ids))
 
     def _add_torrent(self, torrent, download_path, name):
-        logger.debug('Adding torrent to {}:{}'.format(self._host, self._port))
+        logger.debug('Adding torrent to {}:{}', self._host, self._port)
         base64_torrent = base64.b64encode(torrent).decode()
         if name is not None:
             # Need to rename the torrent as specified in the request
@@ -87,7 +88,7 @@ class TransmissionAsyncExecutor:
             self._add_torrent, torrent, download_path, name))
 
     def _delete_torrent(self, t_id):
-        logger.debug('Deleting torrent {} from {}:{}'.format(t_id, self._host, self._port))
+        logger.debug('Deleting torrent {} from {}:{}', t_id, self._host, self._port)
         self._client.remove_torrent(t_id, delete_data=True)
 
     async def delete_torrent(self, t_id):

@@ -2,7 +2,6 @@ from clients import TorrentState, FieldInfo
 from libtorrent_impl.params import STATUS_MAPPING
 from libtorrent_impl.utils import LibtorrentClientException, format_tracker_error
 from models import LibtorrentTorrent
-from utils import timezone_now
 
 
 def _convert_status(state):
@@ -38,7 +37,6 @@ class LibtorrentTorrentState(TorrentState):
 
         self.handle = handle
         self.state = None
-        self.last_update = None
         self.tracker_status = self.TRACKER_PENDING
 
         if db_torrent:
@@ -70,9 +68,9 @@ class LibtorrentTorrentState(TorrentState):
         self.db_torrent.delete_instance()
 
     def update_from_status(self, status):
-        if self.info_hash != str(status.info_hash):
-            raise LibtorrentClientException('Updating wrong TorrentStatus')
-        self.last_update = timezone_now()
+        if __debug__:
+            if self.info_hash != str(status.info_hash):
+                raise LibtorrentClientException('Updating wrong TorrentStatus')
         return self._sync_fields(status)
 
     def update_tracker_success(self):

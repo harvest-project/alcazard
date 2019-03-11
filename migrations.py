@@ -3,9 +3,10 @@ import logging
 import peewee
 from playhouse import migrate
 
+from alcazar_logging import BraceAdapter
 from models import Migration, DB
 
-logger = logging.getLogger(__name__)
+logger = BraceAdapter(logging.getLogger(__name__))
 
 
 def _migration_initial(migrator):
@@ -22,7 +23,7 @@ def _migration_add_libtorrent_download_upload(migrator):
 
 
 def _migration_add_libtorrent_torrent_name(migrator):
-    name = name = peewee.TextField(default='')
+    name = peewee.TextField(null=True)
     migrate.migrate(
         migrator.add_column('libtorrenttorrent', 'name', name),
     )
@@ -46,7 +47,7 @@ def _handle_migrations(current_migrations):
     for migration_name, migration_fn in MIGRATIONS:
         if migration_name in current_migrations:
             continue
-        logger.info('Running migration {}'.format(migration_name))
+        logger.info('Running migration {}', migration_name)
         with DB.atomic():
             migration_fn(migrator)
             Migration(name=migration_name).save()

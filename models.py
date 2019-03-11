@@ -84,13 +84,13 @@ class RemoteTransmissionConfig(ManagerConfig, peewee.Model):
         return result
 
     @classmethod
-    def create_new(cls, realm, host, port, username, password):
+    def create_new(cls, realm, rpc_host, rpc_port, rpc_username, rpc_password):
         return cls.create(
             realm=realm,
-            rpc_host=host,
-            rpc_port=port,
-            rpc_username=username,
-            rpc_password=password,
+            rpc_host=rpc_host,
+            rpc_port=rpc_port,
+            rpc_username=rpc_username,
+            rpc_password=rpc_password,
         )
 
     class Meta:
@@ -124,7 +124,7 @@ class LibtorrentTorrent(peewee.Model):
     info_hash = peewee.CharField(max_length=40, index=True)
     torrent_file = peewee.BlobField()
     download_path = peewee.TextField()
-    name = peewee.TextField()
+    name = peewee.TextField(null=True)
     resume_data = peewee.BlobField(null=True)
 
     class Meta:

@@ -2,17 +2,8 @@
 import argparse
 import logging
 
+from alcazar_logging import configure_logging
 from host import AlcazarHost
-
-
-def configure_logging(log_level):
-    logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    )
-
-    peewee_logger = logging.getLogger('peewee')
-    peewee_logger.setLevel(max(logging.INFO, log_level))  # We don't want peewee queries
 
 
 def run_config(args):

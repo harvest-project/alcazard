@@ -5,7 +5,6 @@ import string
 import traceback
 import urllib.parse
 from datetime import datetime
-from typing import Set
 
 import bencode
 from aiohttp import web
@@ -17,7 +16,8 @@ DEFAULT_PORT = 7001
 def parse_port_pools_fmt(port_pools_fmt):
     def _parse_range(range):
         parts = range.split('-')
-        assert len(parts) == 2
+        if len(parts) != 2:
+            return ValueError('Invalid port range format {}'.format(parts))
         return int(parts[0]), int(parts[1])
 
     return [_parse_range(range_str) for range_str in port_pools_fmt.split(',')]

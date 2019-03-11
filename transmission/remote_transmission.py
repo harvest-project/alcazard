@@ -1,10 +1,11 @@
 import logging
 
+from alcazar_logging import BraceAdapter
 from models import RemoteTransmissionConfig
 from transmission.base_transmission import BaseTransmission
 from transmission.executor import TransmissionAsyncExecutor
 
-logger = logging.getLogger(__name__)
+logger = BraceAdapter(logging.getLogger(__name__))
 
 
 class RemoteTransmission(BaseTransmission):

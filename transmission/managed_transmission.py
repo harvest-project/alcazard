@@ -3,11 +3,12 @@ import logging
 import os
 import subprocess
 
+from alcazar_logging import BraceAdapter
 from models import ManagedTransmissionConfig
 from transmission.base_transmission import BaseTransmission
 from transmission.executor import TransmissionAsyncExecutor
 
-logger = logging.getLogger(__name__)
+logger = BraceAdapter(logging.getLogger(__name__))
 
 
 class ManagedTransmission(BaseTransmission):
@@ -32,7 +33,7 @@ class ManagedTransmission(BaseTransmission):
         return self._peer_port
 
     def _write_transmission_config(self):
-        logger.debug('Writing transmission settings for {}'.format(self._name))
+        logger.debug('Writing transmission settings for {}', self._name)
         result = dict(self.config.transmission_settings)
         result.update({
             'dht-enabled': self.config.is_dht_enabled,
@@ -46,12 +47,12 @@ class ManagedTransmission(BaseTransmission):
             f.write(json.dumps(result, indent=4))
 
     def launch(self):
-        logger.debug('Launching {}'.format(self._name))
+        logger.debug('Launching {}', self._name)
         self._rpc_port = self._orchestrator.grab_local_port()
         self._peer_port = self._orchestrator.grab_peer_port()
-        logger.debug('Received rpc_port={} and peer_port={} for {}'.format(self._rpc_port, self._peer_port, self._name))
+        logger.debug('Received rpc_port={} and peer_port={} for {}', self._rpc_port, self._peer_port, self._name)
         self._write_transmission_config()
-        logger.info('Starting transmission-daemon for {}'.format(self._name))
+        logger.info('Starting transmission-daemon for {}', self._name)
         self._process = subprocess.Popen(['transmission-daemon', '-f', '-g', self._state_path])
         self._executor = TransmissionAsyncExecutor(
             host='127.0.0.1',
@@ -62,12 +63,12 @@ class ManagedTransmission(BaseTransmission):
         super().launch()
 
     def shutdown(self):
-        logger.debug('Shutting down {}'.format(self._name))
+        logger.debug('Shutting down {}', self._name)
         try:
             self._process.terminate()
             self._process.wait(self.SHUTDOWN_TIMEOUT)
         except subprocess.TimeoutExpired:
-            logger.debug('transmission-daemon did not exit on time, killing {}...'.format(self._name))
+            logger.debug('transmission-daemon did not exit on time, killing {}...', self._name)
             self._process.kill()
 
     def get_info_dict(self):

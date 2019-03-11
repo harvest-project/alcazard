@@ -4,10 +4,11 @@ import traceback
 from abc import ABC, abstractmethod
 from asyncio import CancelledError
 
+from alcazar_logging import BraceAdapter
 from error_manager import ErrorManager, Severity
 from utils import timezone_now
 
-logger = logging.getLogger(__name__)
+logger = BraceAdapter(logging.getLogger(__name__))
 
 
 class AlcazarException(Exception):
@@ -173,6 +174,7 @@ class Manager(ABC):
 
     @abstractmethod
     def launch(self):
+        logger.info('Launching {}', self._name)
         self._launch_datetime = timezone_now()
 
     @abstractmethod
@@ -212,7 +214,7 @@ class Manager(ABC):
         start = time.time()
         ran = await task.run_if_needed(current_time)
         if ran:
-            logger.debug('{}.{} took {:.3f}'.format(self._name, task.fn.__name__, time.time() - start))
+            logger.debug('{}.{} took {:.3f}', self._name, task.fn.__name__, time.time() - start)
         return ran
 
     async def _run_periodic_tasks(self):
@@ -243,18 +245,18 @@ def get_manager_types():
         from transmission.managed_transmission import ManagedTransmission
         managers.append(ManagedTransmission)
     except (ImportError, ModuleNotFoundError) as exc:
-        logger.warning('Unable import managed_transmission: {}.'.format(exc))
+        logger.warning('Unable import managed_transmission: {}.', exc)
 
     try:
         from transmission.remote_transmission import RemoteTransmission
         managers.append(RemoteTransmission)
     except (ImportError, ModuleNotFoundError) as exc:
-        logger.warning('Unable import remote_transmission: {}.'.format(exc))
+        logger.warning('Unable import remote_transmission: {}.', exc)
 
     try:
         from libtorrent_impl.managed_libtorrent import ManagedLibtorrent
         managers.append(ManagedLibtorrent)
     except (ImportError, ModuleNotFoundError) as exc:
-        logger.warning('Unable import managed_libtorrent: {}.'.format(exc))
+        logger.warning('Unable import managed_libtorrent: {}.', exc)
 
     return {manager_type.key: manager_type for manager_type in managers}

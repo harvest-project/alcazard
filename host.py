@@ -1,13 +1,14 @@
 import logging
 import os
 
+from alcazar_logging import BraceAdapter
 from api import AlcazarAPI
 from migrations import apply_migrations
 from models import DB, Config, MODELS
 from orchestrator import AlcazarOrchestrator
 from utils import DEFAULT_PORT
 
-logger = logging.getLogger(__name__)
+logger = BraceAdapter(logging.getLogger(__name__))
 
 
 class AlcazarHost:
@@ -20,7 +21,7 @@ class AlcazarHost:
         apply_migrations()
 
     def config(self, api_port):
-        logger.info('Configuring alcazard with state at {}'.format(self.state_path))
+        logger.info('Configuring alcazard with state at {}', self.state_path)
 
         api_port = api_port or DEFAULT_PORT
 
@@ -47,7 +48,7 @@ class AlcazarHost:
         logger.info('Saved configuration - done.')
 
     def run(self):
-        logger.info('Starting alcazard with state at {}.'.format(self.state_path))
+        logger.info('Starting alcazard with state at {}.', self.state_path)
 
         if not os.path.isfile(self.db_path):
             print('Missing state DB at {}! Exiting.'.format(self.db_path))

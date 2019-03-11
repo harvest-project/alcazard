@@ -2,13 +2,14 @@ import asyncio
 import datetime
 import logging
 
+from alcazar_logging import BraceAdapter
 from clients import Manager, PeriodicTaskInfo
 from transmission import params
 from transmission.session_stats import TransmissionSessionStats
 from transmission.torrent_state import TransmissionTorrentState
 from utils import timezone_now
 
-logger = logging.getLogger(__name__)
+logger = BraceAdapter(logging.getLogger(__name__))
 
 
 class BaseTransmission(Manager):
@@ -85,7 +86,7 @@ class BaseTransmission(Manager):
         return received_info_hashes
 
     async def _full_update(self):
-        logger.debug('Starting full update for {}'.format(self._name))
+        logger.debug('Starting full update for {}', self._name)
         start = timezone_now()
 
         received_info_hashes = await self.__update_torrents(None)
@@ -99,11 +100,11 @@ class BaseTransmission(Manager):
         self._last_full_update_seconds = (timezone_now() - start).total_seconds()
 
     async def _quick_update(self):
-        logger.debug('Quick update hashes: {}'.format(self._quick_update_info_hashes))
+        logger.debug('Quick update hashes: {}', self._quick_update_info_hashes)
         if not self._quick_update_info_hashes:
             return
 
-        logger.debug('Starting quick update for {}'.format(self._name))
+        logger.debug('Starting quick update for {}', self._name)
         start = timezone_now()
 
         await self.__update_torrents(self._quick_update_info_hashes)
@@ -119,6 +120,7 @@ class BaseTransmission(Manager):
     def get_debug_dict(self):
         data = super().get_debug_dict()
         data.update({
+            'torrents_in_quick_update': len(self._quick_update_info_hashes),
             'last_full_update_seconds': self._last_full_update_seconds,
             'last_quick_update_seconds': self._last_quick_update_seconds,
         })
@@ -136,12 +138,12 @@ class BaseTransmission(Manager):
 
         if torrent_state.should_quick_update:
             torrent_state.last_quick_update = timezone_now()
-            logger.debug('Add torrent {} for quick updating.'.format(torrent_state.info_hash))
+            logger.debug('Add torrent {} for quick updating.', torrent_state.info_hash)
             self._quick_update_info_hashes.add(torrent_state.info_hash)
         elif torrent_state.info_hash in self._quick_update_info_hashes:
             secs_since_last = (timezone_now() - torrent_state.last_quick_update).total_seconds()
             if secs_since_last > params.QUICK_UPDATE_TIMEOUT:
-                logger.debug('Remove torrent {} from quick updating.'.format(torrent_state.info_hash))
+                logger.debug('Remove torrent {} from quick updating.', torrent_state.info_hash)
                 self._quick_update_info_hashes.remove(torrent_state.info_hash)
 
         return torrent_state
@@ -158,12 +160,12 @@ class BaseTransmission(Manager):
             logger.error(message)
             raise Exception(message)
 
-        logger.info('Adding torrent in {}'.format(self._name))
+        logger.info('Adding torrent in {}', self._name)
         t_torrent = await self._executor.add_torrent(torrent, download_path, name)
         info_hash = t_torrent.hashString
 
         self._deleted_info_hashes.discard(info_hash)
-        logger.debug('Adding new torrent {} for quick update.'.format(info_hash))
+        logger.debug('Adding new torrent {} for quick update.', info_hash)
         self._quick_update_info_hashes.add(info_hash)
         return self._register_t_torrent_update(t_torrent)
 
@@ -174,7 +176,7 @@ class BaseTransmission(Manager):
             logger.error(message)
             raise Exception(message)
 
-        logger.info('Deleting torrent {} from {}'.format(info_hash, self._name))
+        logger.info('Deleting torrent {} from {}', info_hash, self._name)
         torrent_state = self._torrent_states[info_hash]
         await self._executor.delete_torrent(torrent_state.transmission_id)
         self._deleted_info_hashes.add(info_hash)
