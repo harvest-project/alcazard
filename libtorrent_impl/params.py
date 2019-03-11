@@ -22,7 +22,7 @@ SLOW_LOOP_THRESHOLD = 0.5  # Slower loops than this many seconds emits a warning
 POST_UPDATES_INTERVAL = 3  # Post updates every 3 minutes
 SAVE_RESUME_DATA_INTERVAL = 15 * 60  # Save resume data for all torrents (that need it) every 15 minutes
 UPDATE_SESSION_STATS_INTERVAL = 3  # Interval in seconds for updating session stats
-SHUTDOWN_TIMEOUT = 60  # Seconds to wait for alerts during shutdown to be processed
+SHUTDOWN_TIMEOUT = 120  # Seconds to wait for alerts during shutdown to be processed
 
 INITIAL_TORRENT_LOAD_BATCH_SIZE = 500  # Number of torrent in a batch when loading initial torrents into the session
 INITIAL_TORRENT_LOAD_BATCH_SLEEP = 0.1  # Seconds to sleep between loading initial torrent batches
