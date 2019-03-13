@@ -35,7 +35,7 @@ def get_session_settings(peer_port, enable_dht):
     _million = 10 ** 6
     return {
         # Client identification
-        'user_agent': 'Deluge/{}'.format('1.2.15', '1.0.9.0'),
+        'user_agent': 'Deluge/{}'.format('1.2.15'),
         'peer_fingerprint': '-DE13F0-',
 
         # Basic settings

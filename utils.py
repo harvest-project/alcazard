@@ -48,12 +48,12 @@ def timezone_now():
 
 
 def chunks(iterable, n):
-    chunk = list()
+    chunk = []
     for item in iterable:
         chunk.append(item)
         if len(chunk) >= n:
             yield chunk
-            chunk.clear()
+            chunk = []
     if len(chunk):
         yield chunk
 

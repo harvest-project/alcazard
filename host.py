@@ -59,6 +59,7 @@ class AlcazarHost:
         self._init_db()
 
         config = Config.get()
+        config.db_path = self.db_path
         config.state_path = self.state_path
 
         orchestrator = None
