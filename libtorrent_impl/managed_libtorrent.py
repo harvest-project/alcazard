@@ -103,7 +103,12 @@ class ManagedLibtorrent(Manager):
         from .speedups import session
         import Cython.Compiler.Options
         Cython.Compiler.Options.annotate = True
-        self.__session = session.LibtorrentSession(settings)  # self._config.db_path
+        self.__session = session.LibtorrentSession(
+            db_path=self.config.db_path,
+            config_id=self.instance_config.id,
+            listen_interfaces='0.0.0.0:{0},[::]:{0}'.format(self._peer_port),
+            enable_dht=self.config.is_dht_enabled,
+        )
 
         asyncio.ensure_future(self._load_initial_torrents())
         asyncio.ensure_future(self._loop())
@@ -518,11 +523,11 @@ class ManagedLibtorrent(Manager):
 
     @profile
     def _add_torrent(self, torrent, download_path, name, *, async_add, resume_data):
+        add_params = params.get_torrent_add_params(torrent, download_path, name, resume_data)
 
         if async_add:
-            self.__session.async_add_torrent(torrent, download_path, name, resume_data)
+            self._session.async_add_torrent(add_params)
         else:
-            add_params = params.get_torrent_add_params(torrent, download_path, name, resume_data)
             handle = self._session.add_torrent(add_params)
             status = handle.status(0)
             if str(status.info_hash) in self._torrent_states:

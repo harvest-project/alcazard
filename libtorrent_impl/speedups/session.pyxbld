@@ -1,11 +1,18 @@
+import os
+
 def make_ext(modname, pyxfilename):
     from distutils.extension import Extension
 
     ext = Extension(
         name=modname,
-        sources=[pyxfilename],
+        sources=[
+            'SessionWrapper.cpp',
+            pyxfilename,
+        ],
         language='c++',
         extra_compile_args=[
+            '-Werror',
+            '-I{}'.format(os.path.dirname(__file__)),
             '-I/usr/local/Cellar/boost/1.68.0_1/include/',
             '-I/usr/local/Cellar/libtorrent-rasterbar/1.1.11/include/',
         ],
