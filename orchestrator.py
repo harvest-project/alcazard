@@ -100,23 +100,23 @@ class AlcazarOrchestrator:
             raise TorrentNotFoundException()
         await manager.delete_torrent(info_hash)
 
-    def on_torrent_added(self, torrent_state):
+    def on_torrent_added(self, manager, data):
         if __debug__:
-            logger.debug('Received torrent added from {} for {}', torrent_state.manager.name, torrent_state.info_hash)
+            logger.debug('Received torrent added from {} for {}', manager.name, data['info_hash'])
 
-        realm_id = torrent_state.manager.instance_config.realm_id
-        self.realm_info_hash_to_manager[realm_id][torrent_state.info_hash] = torrent_state.manager
+        realm_id = manager.instance_config.realm_id
+        self.realm_info_hash_to_manager[realm_id][data['info_hash']] = manager
         # For now, treat adds as updates, the difference is min
-        self.on_torrent_updated(torrent_state)
+        self.on_torrent_updated(manager, data)
 
-    def on_torrent_updated(self, torrent_state):
+    def on_torrent_updated(self, manager, data):
         if __debug__:
-            logger.debug('Received torrent update from {} for {}', torrent_state.manager.name, torrent_state.info_hash)
+            logger.debug('Received torrent update from {} for {}', manager.name, data['info_hash'])
 
-        realm = torrent_state.manager.instance_config.realm
-        self.pooled_updates[torrent_state.info_hash] = torrent_state.to_dict()
+        realm = manager.instance_config.realm
+        self.pooled_updates[data['info_hash']] = data
         # Remove potential entries in pooled_removes, in case it's re-added before updates are fetched
-        self.pooled_removes.discard((realm.name, torrent_state.info_hash))
+        self.pooled_removes.discard((realm.name, data['info_hash']))
 
     def on_torrent_removed(self, manager, info_hash):
         if __debug__:

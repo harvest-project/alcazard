@@ -1,4 +1,4 @@
-/.idea/
+.idea/
 /state/
 __pycache__/
 /datapan/
@@ -6,3 +6,5 @@ __pycache__/
 /.mypy_cache/
 /scratch/
 /libtorrent.py
+
+libtorrent_impl/speedups/session.cpp

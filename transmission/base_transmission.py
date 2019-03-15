@@ -130,11 +130,11 @@ class BaseTransmission(Manager):
         if t_torrent.hashString in self._torrent_states:
             torrent_state = self._torrent_states[t_torrent.hashString]
             if torrent_state.update_from_t_torrent(t_torrent):
-                self._orchestrator.on_torrent_updated(torrent_state)
+                self._orchestrator.on_torrent_updated(self, torrent_state.to_dict())
         else:
             torrent_state = TransmissionTorrentState(self, t_torrent)
             self._torrent_states[torrent_state.info_hash] = torrent_state
-            self._orchestrator.on_torrent_added(torrent_state)
+            self._orchestrator.on_torrent_added(self, torrent_state.to_dict())
 
         if torrent_state.should_quick_update:
             torrent_state.last_quick_update = timezone_now()

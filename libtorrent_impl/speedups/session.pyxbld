@@ -1,22 +1,32 @@
 import os
 
+
 def make_ext(modname, pyxfilename):
     from distutils.extension import Extension
 
     ext = Extension(
         name=modname,
         sources=[
+            'Logging.cpp',
+            'SqliteHelper.cpp',
+            'TorrentState.cpp',
             'SessionWrapper.cpp',
             pyxfilename,
         ],
         language='c++',
         extra_compile_args=[
+            '-std=c++11',
             '-Werror',
+            '-Wno-unreachable-code',
+
             '-I{}'.format(os.path.dirname(__file__)),
             '-I/usr/local/Cellar/boost/1.68.0_1/include/',
             '-I/usr/local/Cellar/libtorrent-rasterbar/1.1.11/include/',
         ],
+        libraries=[
+            'torrent-rasterbar',
+        ],
         extra_link_args=[
-            '-Llibtorrent-rasterbar',
+            '-L/usr/local/lib/',
         ])
     return ext

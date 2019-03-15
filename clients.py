@@ -36,12 +36,12 @@ class FieldInfo:
 
 
 class SessionStats:
-    def __init__(self):
-        self.torrent_count = None
-        self.downloaded = None
-        self.uploaded = None
-        self.download_rate = None
-        self.upload_rate = None
+    def __init__(self, torrent_count, downloaded, uploaded, download_rate, upload_rate):
+        self.torrent_count = torrent_count
+        self.downloaded = downloaded
+        self.uploaded = uploaded
+        self.download_rate = download_rate
+        self.upload_rate = upload_rate
 
     def to_dict(self):
         return dict(self.__dict__)
@@ -254,9 +254,13 @@ def get_manager_types():
         logger.warning('Unable import remote_transmission: {}.', exc)
 
     try:
+        if __debug__:
+            import pyximport
+            pyximport.install()
         from libtorrent_impl.managed_libtorrent import ManagedLibtorrent
         managers.append(ManagedLibtorrent)
     except (ImportError, ModuleNotFoundError) as exc:
+        raise
         logger.warning('Unable import managed_libtorrent: {}.', exc)
 
     return {manager_type.key: manager_type for manager_type in managers}
