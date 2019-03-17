@@ -1,11 +1,13 @@
 # cython: language_level=3
 import time
 
+from cython.operator cimport dereference as deref
 from libc.stdint cimport int64_t, uint64_t
 from libcpp cimport bool as cbool
 from libcpp.string cimport string
 from libcpp.vector cimport vector
 from libcpp.utility cimport pair
+from libcpp.memory cimport shared_ptr
 from libcpp.unordered_map cimport unordered_map
 
 from libtorrent_impl import params
@@ -32,6 +34,7 @@ cdef extern from "SessionWrapper.hpp":
     cdef cppclass TorrentState:
         string info_hash
         int status
+        string name;
         string download_path;
         int64_t size;
         int64_t downloaded;
@@ -47,15 +50,17 @@ cdef extern from "SessionWrapper.hpp":
         double total_seconds
 
     cdef cppclass BatchTorrentUpdate:
-        vector[TorrentState*] added
-        vector[TorrentState*] updated
+        vector[shared_ptr[TorrentState]] added
+        vector[shared_ptr[TorrentState]] updated
         vector[string] removed
 
         unordered_map[string, uint64_t] metrics;
         unordered_map[string, TimerStat] timer_stats;
 
+        int num_waiting_for_resume_data
+
     cdef cppclass SessionWrapper:
-        unordered_map[string, TorrentState*] torrent_states
+        unordered_map[string, shared_ptr[TorrentState]] torrent_states
 
         SessionWrapper(
                 string db_path,
@@ -71,6 +76,7 @@ cdef extern from "SessionWrapper.hpp":
         int listen_port() nogil except +
         BatchTorrentUpdate process_alerts() nogil except +
         void post_session_stats() nogil except +
+        void all_torrents_save_resume_data(cbool flush_cache) nogil except +
 
 cdef calc_dict_rate(old_dict, new_dict, key):
     if not old_dict:
@@ -123,20 +129,22 @@ cdef class LibtorrentSession:
         with nogil:
             self.wrapper.pause()
 
-    cdef dict torrent_state_to_dict(self, TorrentState *state):
+    cdef dict torrent_state_to_dict(self, shared_ptr[TorrentState] state):
         return {
-            'info_hash': to_hex(state.info_hash).decode(),
+            'info_hash': to_hex(deref(state).info_hash).decode(),
             'client': self.name,
-            'status': state.status,
-            'download_path': state.download_path.decode(),
-            'size': state.size,
-            'downloaded': state.downloaded,
-            'uploaded': state.uploaded,
-            'download_rate': state.download_rate,
-            'upload_rate': state.upload_rate,
-            'progress': state.progress,
-            'error': state.error if state.error.size() else None,
-            'tracker_error': state.tracker_error if state.tracker_error.size() else None,
+            'status': deref(state).status,
+            'name': deref(state).name.decode(),
+            'download_path': deref(state).download_path.decode(),
+            'size': deref(state).size,
+            'downloaded': deref(state).downloaded,
+            'uploaded': deref(state).uploaded,
+            'download_rate': deref(state).download_rate,
+            'upload_rate': deref(state).upload_rate,
+            'progress': deref(state).progress,
+            'error': deref(state).error if deref(state).error.size() else None,
+            'tracker_error': deref(state).tracker_error if deref(state).tracker_error.size() else None,
+            'date_added': None,
         }
 
     cdef void _update_manager_session_stats(self, dict prev_metrics, dict new_metrics) except *:
@@ -171,6 +179,8 @@ cdef class LibtorrentSession:
             pair[string, uint64_t] metric_stat
             dict timer_stats_dict = {}
             dict metrics_dict = {}
+
+        self.manager._num_waiting_for_resume_data = update.num_waiting_for_resume_data
 
         if update.timer_stats.size():
             for timer_stat in update.timer_stats:
@@ -250,3 +260,9 @@ cdef class LibtorrentSession:
     def load_initial_torrents(self):
         with nogil:
             self.wrapper.load_initial_torrents()
+
+    def all_torrents_save_resume_data(self, flush_cache):
+        cdef cbool c_flush_cache = flush_cache
+
+        with nogil:
+            self.wrapper.all_torrents_save_resume_data(c_flush_cache)

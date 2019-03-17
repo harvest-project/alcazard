@@ -16,7 +16,23 @@ public:
     };
 
     static void set_level(Level level);
-    inline static std::string get_level_name(Level level);
+
+    inline static std::string get_level_name(Level level) {
+        switch (level) {
+            case Logger::CRITICAL:
+                return "CRITICAL";
+            case Logger::ERROR:
+                return "ERROR";
+            case Logger::WARNING:
+                return "WARNING";
+            case Logger::INFO:
+                return "INFO";
+            case Logger::DEBUG:
+                return "DEBUG";
+            default:
+                throw std::runtime_error("Unknown level");
+        }
+    }
 
 private:
     static Level level;
@@ -25,13 +41,57 @@ private:
 public:
     Logger(std::string name);
 
+    inline bool is_enabled_for(Level level) {
+        return level >= this->level;
+    }
+
     void log_va(Level level, const char *format, va_list);
-    void log(Level level, const char *format, ...);
-    void critical(const char *format, ...);
-    void error(const char *format, ...);
-    void warning(const char *format, ...);
-    void info(const char *format, ...);
-    void debug(const char *format, ...);
+
+    inline void log(Level level, const char *format, ...) {
+        if (!this->is_enabled_for(level)) {
+            return;
+        }
+
+        va_list args;
+        va_start(args, format);
+        this->log_va(level, format, args);
+        va_end(args);
+    }
+
+    inline void critical(const char *format, ...) {
+        va_list args;
+        va_start(args, format);
+        this->log_va(Logger::ERROR, format, args);
+        va_end(args);
+    }
+
+    inline void error(const char *format, ...) {
+        va_list args;
+        va_start(args, format);
+        this->log_va(Logger::ERROR, format, args);
+        va_end(args);
+    }
+
+    inline void warning(const char *format, ...) {
+        va_list args;
+        va_start(args, format);
+        this->log_va(Logger::WARNING, format, args);
+        va_end(args);
+    }
+
+    inline void info(const char *format, ...) {
+        va_list args;
+        va_start(args, format);
+        this->log_va(Logger::INFO, format, args);
+        va_end(args);
+    }
+
+    inline void debug(const char *format, ...) {
+        va_list args;
+        va_start(args, format);
+        this->log_va(Logger::DEBUG, format, args);
+        va_end(args);
+    }
 };
 
 class Timer {

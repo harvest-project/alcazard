@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <string>
 #include <libtorrent/torrent_status.hpp>
+#include <libtorrent/alert_types.hpp>
 
 #include "Utils.hpp"
 
@@ -18,11 +19,24 @@ enum Status {
     STATUS_STOPPED = 4
 };
 
+enum TrackerStatus {
+    TRACKER_STATUS_PENDING = 0,
+    TRACKER_STATUS_ANNOUNCING = 1,
+    TRACKER_STATUS_SUCCESS = 2,
+    TRACKER_STATUS_ERROR = 3,
+    TRACKER_STATUS_MAX
+};
+
 class TorrentState {
 public:
+    lt::torrent_handle handle;
 
+    int64_t row_id;
     std::string info_hash;
+    TrackerStatus tracker_status;
+    lt::torrent_status::state_t state;
     Status status;
+    std::string name;
     std::string download_path;
     int64_t size;
     int64_t downloaded;
@@ -33,21 +47,22 @@ public:
     std::string error;
     std::string tracker_error;
 
-    TorrentState(lt::torrent_status *status);
-
+    TorrentState(int64_t row_id, lt::torrent_status *status);
     bool update_from_status(lt::torrent_status *status);
+    bool update_tracker_announce();
+    bool update_tracker_reply();
+    bool update_tracker_error(lt::tracker_error_alert *alert);
 };
 
 class BatchTorrentUpdate {
 public:
-    std::vector <lt::torrent_handle> added_handles;
-
-    std::vector<TorrentState *> added;
-    std::vector<TorrentState *> updated;
+    std::vector <std::shared_ptr<TorrentState >> added;
+    std::vector <std::shared_ptr<TorrentState>> updated;
     std::vector <std::string> removed;
 
     std::unordered_map <std::string, uint64_t> metrics;
     std::unordered_map <std::string, TimerStat> timer_stats;
+    int num_waiting_for_resume_data;
 };
 
 inline Status get_alcazar_status(lt::torrent_status::state_t state) {

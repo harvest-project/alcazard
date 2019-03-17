@@ -6,23 +6,6 @@
 
 Logger::Level Logger::level = Logger::WARNING;
 
-inline std::string Logger::get_level_name(Logger::Level level) {
-    switch (level) {
-        case Logger::CRITICAL:
-            return "CRITICAL";
-        case Logger::ERROR:
-            return "ERROR";
-        case Logger::WARNING:
-            return "WARNING";
-        case Logger::INFO:
-            return "INFO";
-        case Logger::DEBUG:
-            return "DEBUG";
-        default:
-            throw std::runtime_error("Unknown level");
-    }
-}
-
 void Logger::set_level(Level level) {
     Logger::level = level;
 }
@@ -31,7 +14,7 @@ Logger::Logger(std::string name) : name(name) {
 }
 
 void Logger::log_va(Level level, const char *format, va_list args) {
-    if (level < Logger::level) {
+    if (!this->is_enabled_for(level)) {
         return;
     }
 
@@ -56,51 +39,6 @@ void Logger::log_va(Level level, const char *format, va_list args) {
     );
     vfprintf(stderr, format, args);
     fprintf(stderr, "\n");
-}
-
-void Logger::log(Level level, const char *format, ...) {
-    if (level < Logger::level) {
-        return;
-    }
-    va_list args;
-    va_start(args, format);
-    this->log_va(level, format, args);
-    va_end(args);
-}
-
-void Logger::critical(const char *format, ...) {
-    va_list args;
-    va_start(args, format);
-    this->log_va(Logger::CRITICAL, format, args);
-    va_end(args);
-}
-
-void Logger::error(const char *format, ...) {
-    va_list args;
-    va_start(args, format);
-    this->log_va(Logger::ERROR, format, args);
-    va_end(args);
-}
-
-void Logger::warning(const char *format, ...) {
-    va_list args;
-    va_start(args, format);
-    this->log_va(Logger::WARNING, format, args);
-    va_end(args);
-}
-
-void Logger::info(const char *format, ...) {
-    va_list args;
-    va_start(args, format);
-    this->log_va(Logger::INFO, format, args);
-    va_end(args);
-}
-
-void Logger::debug(const char *format, ...) {
-    va_list args;
-    va_start(args, format);
-    this->log_va(Logger::DEBUG, format, args);
-    va_end(args);
 }
 
 double Timer::get_time() {

@@ -39,8 +39,12 @@ void SqliteStatement::bind_int64(int col, int64_t value) {
     SQLITE_CHECK(sqlite3_bind_int64(this->ptr, col, value));
 }
 
+void SqliteStatement::bind_text(int col, std::string value) {
+    SQLITE_CHECK(sqlite3_bind_text64(this->ptr, col, value.c_str(), value.size(), NULL, SQLITE_UTF8));
+}
+
 void SqliteStatement::bind_blob(int col, std::string value) {
-    throw std::runtime_error("Not implemented");
+    SQLITE_CHECK(sqlite3_bind_blob64(this->ptr, col, value.c_str(), value.size(), NULL));
 }
 
 bool SqliteStatement::get_is_null(int col) {

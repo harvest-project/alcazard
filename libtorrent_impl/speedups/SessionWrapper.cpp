@@ -5,10 +5,12 @@
 #include <libtorrent/hex.hpp>
 #include <libtorrent/error_code.hpp>
 #include <libtorrent/session_stats.hpp>
+#include <libtorrent/bencode.hpp>
 
 #include "SqliteHelper.hpp"
 #include "Utils.hpp"
 #include "SessionWrapper.hpp"
+#include "yuarel.hpp"
 
 namespace lt = libtorrent;
 
@@ -117,7 +119,8 @@ void SessionWrapper::load_initial_torrents() {
     while (fetch_stmt.step()) {
         if (i++ >= 10000000) break;
 
-        logger.debug("Async adding torrent %lld.", fetch_stmt.get_int64(0));
+        int64_t row_id = fetch_stmt.get_int64(0);
+        logger.debug("Async adding torrent %lld.", row_id);
         this->num_waiting_initial_torrents++;
         bool has_name = !fetch_stmt.get_is_null(3);
         std::string name = has_name ? fetch_stmt.get_text(3) : "";
@@ -132,6 +135,7 @@ void SessionWrapper::load_initial_torrents() {
                 has_name ? &name : NULL,
                 has_resume_data ? &resume_data : NULL
         );
+        add_params.userdata = (void *) row_id;
         this->session->async_add_torrent(add_params);
     }
 
@@ -168,7 +172,8 @@ void SessionWrapper::async_add_torrent(
 
 void SessionWrapper::post_torrent_updates() {
     auto timer = timers.start_timer("post_torrent_updates");
-    this->session->post_torrent_updates(0);
+    this->session->post_torrent_updates(
+            lt::torrent_handle::query_name | lt::torrent_handle::query_save_path);
 }
 
 void SessionWrapper::pause() {
@@ -190,25 +195,19 @@ BatchTorrentUpdate SessionWrapper::process_alerts() {
             this->on_alert_state_update(&update, a);
         } else if (auto a = lt::alert_cast<lt::session_stats_alert>(alert)) {
             this->on_alert_session_stats(&update, a);
+        } else if (auto a = lt::alert_cast<lt::torrent_finished_alert>(alert)) {
+            this->on_alert_torrent_finished(&update, a);
+        } else if (auto a = lt::alert_cast<lt::save_resume_data_alert>(alert)) {
+            this->on_alert_save_resume_data(&update, a);
+        } else if (auto a = lt::alert_cast<lt::save_resume_data_failed_alert>(alert)) {
+            this->on_alert_save_resume_data_failed(&update, a);
+        } else if (auto a = lt::alert_cast<lt::tracker_announce_alert>(alert)) {
+            this->on_alert_tracker_announce(&update, a);
+        } else if (auto a = lt::alert_cast<lt::tracker_reply_alert>(alert)) {
+            this->on_alert_tracker_reply(&update, a);
+        } else if (auto a = lt::alert_cast<lt::tracker_error_alert>(alert)) {
+            this->on_alert_tracker_error(&update, a);
         }
-    }
-
-    if (update.added_handles.size()) {
-//        std::vector <lt::torrent_status> added_statuses;
-//        for (auto added_handle : update.added_handles) {
-//            lt::torrent_status status;
-//            status.handle = added_handle;
-//            added_statuses.push_back(status);
-//        }
-//        {
-//            auto timer = timers.start_timer("refresh_new_statuses");
-//            this->session->refresh_torrent_status(&added_statuses, 0);
-//        }
-//        for (auto &status : added_statuses) {
-//            TorrentState *state = this->handle_torrent_added(&status);
-//            update.added.push_back(state);
-//            --this->num_waiting_initial_torrents;
-//        }
     }
 
     if (this->timer_initial_torrents_received && this->num_waiting_initial_torrents <= 0) {
@@ -216,15 +215,30 @@ BatchTorrentUpdate SessionWrapper::process_alerts() {
         this->timer_initial_torrents_received.reset();
     }
 
+    update.num_waiting_for_resume_data = this->info_hashes_resume_data_wait.size();
+
     return update;
 }
 
-TorrentState *SessionWrapper::handle_torrent_added(lt::torrent_status *status, std::string *torrent_file) {
+std::shared_ptr <TorrentState> SessionWrapper::handle_torrent_added(lt::torrent_status *status) {
+    auto timer = this->timers.start_timer("handle_torrent_added");
     std::string info_hash = status->info_hash.to_string();
     if (this->torrent_states.find(info_hash) != this->torrent_states.end()) {
         throw std::runtime_error("Torrent already added");
     }
-    TorrentState *state = new TorrentState(status);
+
+    int64_t row_id;
+    auto row_id_item = this->added_torrent_row_ids.find(info_hash);
+    if (row_id_item != this->added_torrent_row_ids.end()) {
+        row_id = row_id_item->second;
+        this->added_torrent_row_ids.erase(row_id_item);
+    } else {
+        row_id = 123456789;
+        // TODO: create row
+        throw std::runtime_error("hi");
+    }
+
+    std::shared_ptr <TorrentState> state = std::make_shared<TorrentState>(row_id, status);
     this->torrent_states[info_hash] = state;
     return state;
 }
@@ -234,8 +248,21 @@ void SessionWrapper::post_session_stats() {
     return this->session->post_session_stats();
 }
 
-TimerStats SessionWrapper::get_timer_stats() {
-    return this->timers.stats;
+void SessionWrapper::all_torrents_save_resume_data(bool flush_cache) {
+    auto timer = this->timers.start_timer("all_save_resume_data");
+    logger.info("Triggered all_save_resume_data");
+    int flags = lt::torrent_handle::only_if_modified;
+    if (flush_cache) {
+        flags |= lt::torrent_handle::flush_disk_cache;
+    }
+    for (auto &item : this->torrent_states) {
+        std::string info_hash = item.second->info_hash;
+        if (logger.is_enabled_for(Logger::DEBUG)) {
+            logger.debug("Triggering save resume data for %s.", lt::to_hex(info_hash).c_str());
+        }
+        this->info_hashes_resume_data_wait.insert(info_hash);
+        item.second->handle.save_resume_data(flags);
+    }
 }
 
 void SessionWrapper::on_alert_add_torrent(BatchTorrentUpdate *update, lt::add_torrent_alert *alert) {
@@ -244,7 +271,7 @@ void SessionWrapper::on_alert_add_torrent(BatchTorrentUpdate *update, lt::add_to
         logger.error("Error adding torrent!");
         throw std::runtime_error("Libtorrent returned error adding torrent.");
     }
-    update->added_handles.push_back(alert->handle);
+    this->added_torrent_row_ids[alert->handle.info_hash().to_string()] = (int64_t) alert->params.userdata;
 }
 
 void SessionWrapper::on_alert_state_update(BatchTorrentUpdate *update, lt::state_update_alert *alert) {
@@ -253,7 +280,7 @@ void SessionWrapper::on_alert_state_update(BatchTorrentUpdate *update, lt::state
         std::string info_hash = status.info_hash.to_string();
         auto state = this->torrent_states.find(info_hash);
         if (state == this->torrent_states.end()) {
-            TorrentState *state = this->handle_torrent_added(&status);
+            std::shared_ptr <TorrentState> state = this->handle_torrent_added(&status);
             update->added.push_back(state);
             --this->num_waiting_initial_torrents;
         } else if (state->second->update_from_status(&status)) {
@@ -262,11 +289,141 @@ void SessionWrapper::on_alert_state_update(BatchTorrentUpdate *update, lt::state
     }
 }
 
+void SessionWrapper::calculate_torrent_count_metrics(BatchTorrentUpdate *update) {
+    auto timer = this->timers.start_timer("calculate_torrent_count_metrics");
+    int tracker_statuses[TRACKER_STATUS_MAX];
+    memset(tracker_statuses, 0, sizeof(tracker_statuses));
+    int states[lt::torrent_status::checking_resume_data + 1];
+    memset(states, 0, sizeof(states));
+    for (auto &item : this->torrent_states) {
+        tracker_statuses[item.second->tracker_status]++;
+        states[item.second->state]++;
+    }
+
+    update->metrics["alcazar.torrents.tracker_status.pending[gauge]"] = tracker_statuses[TRACKER_STATUS_PENDING];
+    update->metrics["alcazar.torrents.tracker_status.announcing[gauge]"] = tracker_statuses[TRACKER_STATUS_ANNOUNCING];
+    update->metrics["alcazar.torrents.tracker_status.error[gauge]"] = tracker_statuses[TRACKER_STATUS_ERROR];
+    update->metrics["alcazar.torrents.tracker_status.success[gauge]"] = tracker_statuses[TRACKER_STATUS_SUCCESS];
+
+    update->metrics["alcazar.torrents.state.queued_for_checking[gauge]"] = states[
+            lt::torrent_status::queued_for_checking];
+    update->metrics["alcazar.torrents.state.checking_files[gauge]"] = states[lt::torrent_status::checking_files];
+    update->metrics["alcazar.torrents.state.downloading_metadata[gauge]"] = states[
+            lt::torrent_status::downloading_metadata];
+    update->metrics["alcazar.torrents.state.downloading[gauge]"] = states[lt::torrent_status::downloading];
+    update->metrics["alcazar.torrents.state.finished[gauge]"] = states[lt::torrent_status::finished];
+    update->metrics["alcazar.torrents.state.seeding[gauge]"] = states[lt::torrent_status::seeding];
+    update->metrics["alcazar.torrents.state.allocating[gauge]"] = states[lt::torrent_status::allocating];
+    update->metrics["alcazar.torrents.state.checking_resume_data[gauge]"] = states[
+            lt::torrent_status::checking_resume_data];
+}
+
 void SessionWrapper::on_alert_session_stats(BatchTorrentUpdate *update, lt::session_stats_alert *alert) {
     logger.debug("Received session stats.");
     for (auto &item : this->metrics_names) {
         update->metrics[item.first] = alert->values[item.second];
     }
-    // Piggyback a session stats update to post timers as well
+    // Piggyback a session stats update to post timers and update torrent count metrics
     update->timer_stats = this->timers.stats;
+    this->calculate_torrent_count_metrics(update);
+}
+
+void SessionWrapper::on_alert_torrent_finished(BatchTorrentUpdate *update, lt::torrent_finished_alert *alert) {
+    // Short-circuit while we're still in the loading phase, otherwise this is too slow.
+    if (this->num_waiting_initial_torrents > 0) {
+        return;
+    }
+    auto status = alert->handle.status();
+    if (logger.is_enabled_for(Logger::DEBUG)) {
+        logger.debug("Update torrent finished for %s.", lt::to_hex(status.info_hash.to_string()).c_str());
+    }
+
+    /* Copied explanation from Deluge:
+     * Only save resume data if it was actually downloaded something. Helps
+     * on startup with big queues with lots of seeding torrents. Libtorrent
+     * emits alert_torrent_finished for them, but there seems like nothing
+     * worth really to save in resume data, we just read it up in
+     * self.load_state(). */
+    if (status.total_payload_download) {
+        int flags = lt::torrent_handle::only_if_modified;
+        alert->handle.save_resume_data(flags);
+    }
+}
+
+void SessionWrapper::on_alert_save_resume_data(BatchTorrentUpdate *update, lt::save_resume_data_alert *alert) {
+    auto timer = this->timers.start_timer("on_alert_save_resume_data");
+    auto info_hash = alert->handle.info_hash().to_string();
+    if (logger.is_enabled_for(Logger::DEBUG)) {
+        logger.debug("Received fast resume data for %s.", lt::to_hex(info_hash).c_str());
+    }
+    this->info_hashes_resume_data_wait.erase(info_hash);
+
+    auto state_item = this->torrent_states.find(info_hash);
+    if (state_item == this->torrent_states.end()) {
+        throw std::runtime_error("Received fast resume data for a torrent not in torrent_states.");
+    }
+
+    std::string resume_data;
+    lt::bencode(std::back_inserter(resume_data), *alert->resume_data);
+    SqliteStatement stmt = SqliteStatement(this->db, "UPDATE libtorrenttorrent SET resume_data = ?001 WHERE id = ?002");
+    stmt.bind_blob(1, resume_data);
+    stmt.bind_int64(2, state_item->second->row_id);
+    if (stmt.step()) {
+        throw std::runtime_error("Step returned row on UPDATE.");
+    }
+    int num_changes = sqlite3_changes(this->db);
+    if (num_changes != 1) {
+        logger.error("Save resume data affected %d rows!", num_changes);
+        throw std::runtime_error("Save resume data affected != 1 row.");
+    }
+}
+
+void SessionWrapper::on_alert_save_resume_data_failed(
+        BatchTorrentUpdate *update, lt::save_resume_data_failed_alert *alert) {
+    auto timer = this->timers.start_timer("on_alert_save_resume_data_failed");
+    auto info_hash = alert->handle.info_hash().to_string();
+    if (logger.is_enabled_for(Logger::DEBUG)) {
+        logger.debug("Received fast resume data failed for %s.", lt::to_hex(info_hash).c_str());
+    }
+    this->info_hashes_resume_data_wait.erase(info_hash);
+
+    if (alert->error == lt::errors::resume_data_not_modified) {
+        return;
+    }
+
+    logger.error("Received fast resume data failed for %s.", lt::to_hex(info_hash).c_str());
+    throw std::runtime_error("Received failed fast resume data.");
+}
+
+void SessionWrapper::on_alert_tracker_announce(BatchTorrentUpdate *update, lt::tracker_announce_alert *alert) {
+    auto info_hash = alert->handle.info_hash().to_string();
+    if (logger.is_enabled_for(Logger::DEBUG)) {
+        logger.debug("Received tracker announce for %s.", lt::to_hex(info_hash).c_str());
+    }
+    auto state_item = this->torrent_states.find(info_hash);
+    if (state_item != this->torrent_states.end() && state_item->second->update_tracker_announce()) {
+        update->updated.push_back(state_item->second);
+    }
+}
+
+void SessionWrapper::on_alert_tracker_reply(BatchTorrentUpdate *update, lt::tracker_reply_alert *alert) {
+    auto info_hash = alert->handle.info_hash().to_string();
+    if (logger.is_enabled_for(Logger::DEBUG)) {
+        logger.debug("Received tracker reply for %s.", lt::to_hex(info_hash).c_str());
+    }
+    auto state_item = this->torrent_states.find(info_hash);
+    if (state_item != this->torrent_states.end() && state_item->second->update_tracker_reply()) {
+        update->updated.push_back(state_item->second);
+    }
+}
+
+void SessionWrapper::on_alert_tracker_error(BatchTorrentUpdate *update, lt::tracker_error_alert *alert) {
+    auto info_hash = alert->handle.info_hash().to_string();
+    if (logger.is_enabled_for(Logger::DEBUG)) {
+        logger.debug("Received tracker reply for %s.", lt::to_hex(info_hash).c_str());
+    }
+    auto state_item = this->torrent_states.find(info_hash);
+    if (state_item != this->torrent_states.end() && state_item->second->update_tracker_error(alert)) {
+        update->updated.push_back(state_item->second);
+    }
 }

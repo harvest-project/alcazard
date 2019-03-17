@@ -16,21 +16,6 @@ from libtorrent_impl.utils import LibtorrentClientException
 from models import ManagedLibtorrentConfig
 
 logger = BraceAdapter(logging.getLogger(__name__))
-enable_debug = logger.isEnabledFor(logging.DEBUG)
-
-
-def alert_cb_profile(fn):
-    def inner(self, alert):
-        name = fn.__name__
-        start = time.time()
-        fn(self, alert)
-        self._alert_counts[name] += 1
-        self._alert_cumul_time[name] += time.time() - start
-
-    if enable_debug:
-        return inner
-    else:
-        return fn
 
 
 class ManagedLibtorrent(Manager):
@@ -47,17 +32,14 @@ class ManagedLibtorrent(Manager):
         self._last_post_updates_request = None
         # Timestamp (float) of when the last resume data save was triggered
         self._last_save_resume_data_request = None
-        # Set of info_hashes we're waiting to receive a resume data (failed) alert for.
-        # Used in shutdown to wait for all.
-        self._info_hashes_waiting_for_resume_data_save = set()
         # Used to cache LibtorrentTorrent model instances that we add during startup to avoid issuing N selects
         self._libtorrent_torrent_by_info_hash = {}
+        # Number of torrents waiting for resume data. Used during shutdown.
+        self._num_waiting_for_resume_data = 0
         # Metrics refreshed together with session stats
         self._metrics = None
         # Timer stats from the C++ session manager
         self._timer_stats = None
-        # Number of initial torrents remaining to be added
-        self._initial_torrents_remaining = None
         # Listen port to be set by the first iteration of update_session_stats
         self._listen_port = None
 
@@ -89,8 +71,7 @@ class ManagedLibtorrent(Manager):
 
         self._peer_port = self._orchestrator.grab_peer_port()
 
-        if enable_debug:
-            logger.debug('Received peer_port={} for {}', self._peer_port, self._name)
+        logger.debug('Received peer_port={} for {}', self._peer_port, self._name)
 
         # Reset the timer for saving fast resume data when launched, no need to do it immediately.
         self._save_resume_data_task.last_run_at = time.time()
@@ -142,41 +123,37 @@ class ManagedLibtorrent(Manager):
         await self._exec(self._session.post_torrent_updates)
 
     async def _periodic_resume_save(self):
-        pass  # self._save_torrents_resume_data(None, False)
+        await self._exec(self._session.all_torrents_save_resume_data, False)
 
     async def _update_session_stats(self):
         await self._exec(self._session.post_session_stats)
 
     async def shutdown(self):
         start = time.time()
-        if enable_debug:
-            logger.debug('Initiating libtorrent shutdown')
+        logger.debug('Initiating libtorrent shutdown')
         await self._exec(self._session.pause)
-        if enable_debug:
-            logger.debug('Paused session in {}.', time.time() - start)
+        logger.debug('Paused session in {}.', time.time() - start)
 
         start = time.time()
-        self._save_torrents_resume_data(None, True)
-        if enable_debug:
-            logger.debug('Waiting for save resume data to complete. Running alert poll loop.')
+        logger.debug("Triggering all torrents save resume before shutdown.")
+        await self._exec(self._session.all_torrents_save_resume_data, True)
+        await self._process_alerts()  # Used to populate _num_waiting_for_resume_data
+        logger.debug('Waiting for save resume data to complete. Running alert poll loop.')
         wait_start = time.time()
-        while self._info_hashes_waiting_for_resume_data_save:
-            await self._process_alerts()  # Process as fast as possible
-            time.sleep(params.LOOP_INTERVAL)
+        while self._num_waiting_for_resume_data:
+            logger.debug('Still waiting for {} resume data.', self._num_waiting_for_resume_data)
+            await self._process_alerts()
+            await asyncio.sleep(params.LOOP_INTERVAL)
             if time.time() - wait_start > params.SHUTDOWN_TIMEOUT:
                 raise LibtorrentClientException('Shutdown timeout reached.')
-        logger.info('Saving data completed in {}, session stopped.', time.time() - start)
-
-        # TODO: This is now very async, we need to wait for the alert
-        await self._update_session_stats()
-        logger.debug('Final session sync completed, deallocating session.')
+        logger.info('Saving data completed in {}, deallocating session.', time.time() - start)
 
         # This will dealloc the session object, which takes time
         def _dealloc_session(self):
             self._session = None
 
         await self._exec(_dealloc_session, self)
-        logger.debug('Session destroyed.')
+        logger.info('Session destroyed.')
 
     def get_info_dict(self):
         data = super().get_info_dict()
@@ -197,7 +174,6 @@ class ManagedLibtorrent(Manager):
         data = super().get_debug_dict()
         data.update({
             'num_torrent_per_state': Counter([ts.state for ts in self._torrent_states.values()]),
-            'initial_torrents_remaining': self._initial_torrents_remaining,
             'torrents_with_errors': len([None for state in self._torrent_states.values() if state.error]),
             'torrent_error_types': Counter([ts.error for ts in self._torrent_states.values()]),
             'torrent_tracker_error_types': Counter([ts.tracker_error for ts in self._torrent_states.values()]),
@@ -231,8 +207,7 @@ class ManagedLibtorrent(Manager):
             return torrent_state
 
     async def add_torrent(self, torrent, download_path, name):
-        if enable_debug:
-            logger.debug('Adding torrent to {}', download_path)
+        logger.debug('Adding torrent to {}', download_path)
         return await self._add_torrent(
             torrent=torrent,
             download_path=download_path,
