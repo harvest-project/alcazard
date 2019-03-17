@@ -62,7 +62,7 @@ class ManagedTransmission(BaseTransmission):
         )
         super().launch()
 
-    def shutdown(self):
+    async def shutdown(self):
         logger.debug('Shutting down {}', self._name)
         try:
             self._process.terminate()

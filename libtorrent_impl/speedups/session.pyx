@@ -1,17 +1,32 @@
-# cython: language_level=3
+# cython: language_level=3, profile=True, linetrace=True
+import time
 
-from libc.stdio cimport printf
-from libc.stdint cimport int64_t
+from libc.stdint cimport int64_t, uint64_t
 from libcpp cimport bool as cbool
 from libcpp.string cimport string
 from libcpp.vector cimport vector
+from libcpp.utility cimport pair
 from libcpp.unordered_map cimport unordered_map
-from .libtorrent cimport to_hex, session_status
+
+from libtorrent_impl import params
+from models import ManagedLibtorrentConfig
+from utils import timezone_now
+from .libtorrent cimport to_hex
 
 import logging
-from clients import SessionStats
+from clients import SessionStats, TorrentBatchUpdate
 
 logger = logging.getLogger(__name__)
+
+cdef extern from "Utils.hpp" namespace "Logger":
+    cdef enum Level:
+        CRITICAL
+        ERROR
+        WARNING
+        INFO
+        DEBUG
+
+    cdef void set_level(Level level)
 
 cdef extern from "SessionWrapper.hpp":
     cdef cppclass TorrentState:
@@ -27,10 +42,17 @@ cdef extern from "SessionWrapper.hpp":
         string error;
         string tracker_error;
 
+    ctypedef struct TimerStat:
+        int count
+        double total_seconds
+
     cdef cppclass BatchTorrentUpdate:
         vector[TorrentState*] added
         vector[TorrentState*] updated
-        vector[string] deleted
+        vector[string] removed
+
+        unordered_map[string, uint64_t] metrics;
+        unordered_map[string, TimerStat] timer_stats;
 
     cdef cppclass SessionWrapper:
         unordered_map[string, TorrentState*] torrent_states
@@ -48,25 +70,12 @@ cdef extern from "SessionWrapper.hpp":
         void pause() nogil except +
         int listen_port() nogil except +
         BatchTorrentUpdate process_alerts() nogil except +
-        session_status status() nogil except +
+        void post_session_stats() nogil except +
 
-def enc_str(s):
-    return s.encode() if s else None
-
-cdef dict torrent_state_to_dict(TorrentState *state):
-    return {
-        'info_hash': to_hex(state.info_hash).decode(),
-        'status': state.status,
-        'download_path': state.download_path.decode(),
-        'size': state.size,
-        'downloaded': state.downloaded,
-        'uploaded': state.uploaded,
-        'download_rate': state.download_rate,
-        'upload_rate': state.upload_rate,
-        'progress': state.progress,
-        'error': state.error if state.error.size() else None,
-        'tracker_error': state.tracker_error if state.tracker_error.size() else None,
-    }
+cdef calc_dict_rate(old_dict, new_dict, key):
+    if not old_dict:
+        return 0
+    return int((new_dict[key] - old_dict[key]) / params.UPDATE_SESSION_STATS_INTERVAL)
 
 cdef class LibtorrentSession:
     cdef:
@@ -76,15 +85,19 @@ cdef class LibtorrentSession:
         start_total_downloaded
         start_total_uploaded
         SessionWrapper *wrapper
+        str name
 
     def __init__(self, manager, str db_path, int config_id, str listen_interfaces, cbool enable_dht):
         cdef:
             string c_db_path = db_path.encode()
             string c_listen_interfaces = listen_interfaces.encode()
 
+        set_level(<Level><int>logging.getLogger('').level)
+
         self.orchestrator = manager._orchestrator
         self.manager = manager
         self.instance_config = manager.instance_config
+        self.name = manager.name
 
         # Counters for when the session is started, so that we can add libtorrent's session stats to those
         self.start_total_downloaded = self.instance_config.total_downloaded
@@ -99,7 +112,8 @@ cdef class LibtorrentSession:
             )
 
     def __dealloc__(self):
-        del self.wrapper
+        with nogil:
+            del self.wrapper
 
     def post_torrent_updates(self):
         with nogil:
@@ -109,24 +123,104 @@ cdef class LibtorrentSession:
         with nogil:
             self.wrapper.pause()
 
+    cdef dict torrent_state_to_dict(self, TorrentState *state):
+        return {
+            'info_hash': to_hex(state.info_hash).decode(),
+            'client': self.name,
+            'status': state.status,
+            'download_path': state.download_path.decode(),
+            'size': state.size,
+            'downloaded': state.downloaded,
+            'uploaded': state.uploaded,
+            'download_rate': state.download_rate,
+            'upload_rate': state.upload_rate,
+            'progress': state.progress,
+            'error': state.error if state.error.size() else None,
+            'tracker_error': state.tracker_error if state.tracker_error.size() else None,
+        }
+
+    cdef void _update_manager_session_stats(self, dict prev_metrics, dict new_metrics) except *:
+        cdef:
+            int payload_download = new_metrics['net.recv_payload_bytes[counter]']
+            int payload_upload = new_metrics['net.sent_payload_bytes[counter]']
+
+        self.manager._session_stats = SessionStats(
+            torrent_count=new_metrics['ses.num_loaded_torrents[gauge]'],
+            downloaded=self.start_total_downloaded + payload_download,
+            uploaded=self.start_total_uploaded + payload_upload,
+            download_rate=calc_dict_rate(prev_metrics, new_metrics, 'net.recv_payload_bytes[counter]'),
+            upload_rate=calc_dict_rate(prev_metrics, new_metrics, 'net.sent_payload_bytes[counter]'),
+        )
+
+        updated = (
+                self.instance_config.total_downloaded != self.manager._session_stats.downloaded or
+                self.instance_config.total_uploaded != self.manager._session_stats.uploaded
+        )
+        if updated:
+            logger.debug('Updating session stats in DB.')
+            self.instance_config.total_downloaded = self.manager._session_stats.downloaded
+            self.instance_config.total_uploaded = self.manager._session_stats.uploaded
+            self.instance_config.save(only=(
+                ManagedLibtorrentConfig.total_downloaded,
+                ManagedLibtorrentConfig.total_uploaded,
+            ))
+
+    cdef void _update_session_metrics(self, BatchTorrentUpdate update) except *:
+        cdef:
+            pair[string, TimerStat] timer_stat
+            pair[string, uint64_t] metric_stat
+            dict timer_stats_dict = {}
+            dict metrics_dict = {}
+
+        if update.timer_stats.size():
+            for timer_stat in update.timer_stats:
+                timer_stats_dict[timer_stat.first.decode()] = <dict>timer_stat.second
+            self.manager._timer_stats = timer_stats_dict
+
+        if update.metrics.size():
+            for metric_stat in update.metrics:
+                metrics_dict[metric_stat.first.decode()] = metric_stat.second
+            prev_metrics = self.manager._metrics
+            self.manager._metrics = metrics_dict
+            self._update_manager_session_stats(prev_metrics, metrics_dict)
+
+        if not self.manager._initialized and 'initial_torrents_received' in timer_stats_dict:
+            self.manager._initialized = True
+            self.manager._initialize_time_seconds = (timezone_now() - self.manager._launch_datetime).total_seconds()
+
     def process_alerts(self):
         cdef:
             BatchTorrentUpdate update
             dict state_dict
 
-        logger.info('Processing alerts without gil')
+            dict added = {}
+            dict updated = {}
+            set removed = set()
+
+        logger.debug('Processing alerts without gil')
         with nogil:
             update = self.wrapper.process_alerts()
 
-        logger.info('Processing batch')
+        logger.debug('Updating session metrics')
+        self._update_session_metrics(update)
+
+        # Short-circuit empty update batches
+        if update.added.size() == 0 and update.updated.size() == 0 and update.removed.size() == 0:
+            return None
+
+        logger.debug('Creating batch update')
         for state in update.added:
-            state_dict = torrent_state_to_dict(state)
-            self.orchestrator.on_torrent_added(self.manager, state_dict)
+            state_dict = self.torrent_state_to_dict(state)
+            added[state_dict['info_hash']] = state_dict
         for state in update.updated:
-            state_dict = torrent_state_to_dict(state)
-            self.orchestrator.on_torrent_updated(self.manager, state_dict)
-        for info_hash in update.deleted:
-            self.orchestrator.on_torrent_deleted(self.manager, info_hash)
+            state_dict = self.torrent_state_to_dict(state)
+            updated[state_dict['info_hash']] = state_dict
+        for info_hash in update.removed:
+            removed.add(info_hash)
+
+        logger.debug('Firing batch')
+        self.orchestrator.on_torrent_batch_update(self.manager, TorrentBatchUpdate(added, updated, removed))
+        logger.debug('Batch is processed')
 
     def async_add_torrent(self, bytes torrent, str download_path, str name, bytes resume_data):
         cdef:
@@ -148,25 +242,10 @@ cdef class LibtorrentSession:
             )
 
     def post_session_stats(self):
-        pass
+        self.wrapper.post_session_stats()
 
     def status(self):
         pass
-
-    def listen_port(self):
-        return self.wrapper.listen_port()
-
-    def get_session_stats(self):
-        cdef:
-            session_status status = self.wrapper.status()
-
-        return SessionStats(
-            torrent_count=self.wrapper.torrent_states.size(),
-            downloaded=self.start_total_downloaded + status.total_payload_download,
-            uploaded=self.start_total_uploaded + status.total_payload_upload,
-            download_rate=status.payload_download_rate,
-            upload_rate=status.payload_upload_rate,
-        )
 
     def load_initial_torrents(self):
         with nogil:

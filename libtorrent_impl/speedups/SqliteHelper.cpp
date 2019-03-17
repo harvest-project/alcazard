@@ -47,6 +47,10 @@ bool SqliteStatement::get_is_null(int col) {
     return sqlite3_column_type(this->ptr, col) == SQLITE_NULL;
 }
 
+int64_t SqliteStatement::get_int64(int col) {
+    return sqlite3_column_int64(this->ptr, col);
+}
+
 std::string SqliteStatement::get_text(int col) {
     int length = sqlite3_column_bytes(this->ptr, col);
     if (!length) return "";

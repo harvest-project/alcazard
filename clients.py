@@ -6,7 +6,7 @@ from asyncio import CancelledError
 
 from alcazar_logging import BraceAdapter
 from error_manager import ErrorManager, Severity
-from utils import timezone_now
+from utils import timezone_now, dict_pop_n, set_pop_n
 
 logger = BraceAdapter(logging.getLogger(__name__))
 
@@ -103,7 +103,6 @@ class TorrentState:
         result.update({
             'info_hash': self.info_hash,
             'error': self.error,
-            'realm': self.manager.instance_config.realm.name,
             'client': self.manager.name,
         })
         return result
@@ -121,6 +120,46 @@ class PeriodicTaskInfo:
             await self.fn()
             return True
         return False
+
+
+class TorrentBatchUpdate:
+    def __init__(self, added=None, updated=None, removed=None):
+        self.added = added or {}
+        self.updated = updated or {}
+        self.removed = removed or set()
+
+    def update(self, batch):
+        for info_hash, data in batch.added.items():
+            self.added[info_hash] = data
+            self.updated.pop(info_hash, None)
+            self.removed.discard(info_hash)
+
+        for info_hash, data in batch.updated.items():
+            # If the add was not retrieved yet, update the data there, otherwise add it to updates
+            if info_hash in self.added:
+                self.added[info_hash] = data
+            else:
+                self.updated[info_hash] = data
+            self.removed.discard(data['info_hash'])
+
+        for info_hash in batch.removed:
+            self.added.pop(info_hash, None)
+            self.updated.pop(info_hash, None)
+            self.removed.add(info_hash)
+
+    def pop_batch(self, limit):
+        result = TorrentBatchUpdate()
+        result.added, limit = dict_pop_n(self.added, limit)
+        result.updated, limit = dict_pop_n(self.updated, limit)
+        result.removed, limit = set_pop_n(self.removed, limit)
+        return result, limit
+
+    def to_dict(self):
+        return {
+            'added': list(self.added.values()),
+            'updated': list(self.updated.values()),
+            'removed': list(self.removed),
+        }
 
 
 class Manager(ABC):
@@ -178,7 +217,7 @@ class Manager(ABC):
         self._launch_datetime = timezone_now()
 
     @abstractmethod
-    def shutdown(self):
+    async def shutdown(self):
         pass
 
     @abstractmethod

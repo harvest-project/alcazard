@@ -1,7 +1,11 @@
 #ifndef TORRENTSTATE_HPP_
 #define TORRENTSTATE_HPP_
 
+#include <unordered_map>
+#include <string>
 #include <libtorrent/torrent_status.hpp>
+
+#include "Utils.hpp"
 
 namespace lt = libtorrent;
 
@@ -36,12 +40,14 @@ public:
 
 class BatchTorrentUpdate {
 public:
-
     std::vector <lt::torrent_handle> added_handles;
 
     std::vector<TorrentState *> added;
     std::vector<TorrentState *> updated;
-    std::vector <std::string> deleted;
+    std::vector <std::string> removed;
+
+    std::unordered_map <std::string, uint64_t> metrics;
+    std::unordered_map <std::string, TimerStat> timer_stats;
 };
 
 inline Status get_alcazar_status(lt::torrent_status::state_t state) {

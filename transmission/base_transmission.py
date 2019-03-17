@@ -49,7 +49,7 @@ class BaseTransmission(Manager):
         super().launch()
         asyncio.ensure_future(self._loop())
 
-    def shutdown(self):
+    async def shutdown(self):
         pass
 
     async def _loop(self):

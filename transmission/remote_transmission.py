@@ -27,6 +27,3 @@ class RemoteTransmission(BaseTransmission):
             password=self.instance_config.rpc_password,
         )
         super().launch()
-
-    def shutdown(self):
-        pass

@@ -1,14 +1,17 @@
-import hashlib
 import json
+import logging
 import random
 import string
+import time
 import traceback
 import urllib.parse
 from datetime import datetime
+from functools import wraps
 
-import bencode
 from aiohttp import web
 from pytz import utc
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_PORT = 7001
 
@@ -72,15 +75,6 @@ def jsonify_exceptions(fn):
     return inner
 
 
-class TorrentFileInfo:
-    def __init__(self, torrent_data):
-        meta_info = bencode.bdecode(torrent_data)
-        info = meta_info['info']
-        self.name = info['name']
-        self.info_hash = hashlib.sha1(bencode.bencode(info)).hexdigest()
-        self.files = info.get('files')
-
-
 _ANNOUNCE_TO_NAME_CACHE = {}
 
 
@@ -97,3 +91,37 @@ def extract_name_from_announce(announce):
 
     _ANNOUNCE_TO_NAME_CACHE[announce] = name
     return name
+
+
+def set_pop_n(src, n):
+    if n >= len(src):
+        result = set(src)
+        src.clear()
+        return result, n - len(result)
+    else:
+        result = set(src.pop() for _ in range(n))
+        return result, 0
+
+
+def dict_pop_n(src, n):
+    if n >= len(src):
+        result = dict(src)
+        src.clear()
+        return result, n - len(result)
+    else:
+        result = dict(src.popitem() for _ in range(n))
+        return result, 0
+
+
+def log_start_stop_async(fn):
+    """For performance debugging purposes."""
+
+    @wraps(fn)
+    async def inner(*args, **kwargs):
+        start = time.time()
+        logger.warning('Start function {}'.format(fn.__name__))
+        result = await fn(*args, **kwargs)
+        logger.warning('End function {}, took {}'.format(fn.__name__, time.time() - start))
+        return result
+
+    return inner

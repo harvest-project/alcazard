@@ -27,7 +27,7 @@ class AlcazarAPI:
             web.get('/clients/{client_name}/debug', self.get_client_debug),
             web.post('/torrents/{realm_name}', self.post_torrents),
             web.delete('/torrents/{realm_name}/{info_hash}', self.delete_torrent),
-            web.post('/pop_updates', self.post_pop_updates),
+            web.post('/pop_update_batch', self.post_pop_update_batch),
         ])
 
     @jsonify_exceptions
@@ -52,8 +52,13 @@ class AlcazarAPI:
 
     @jsonify_exceptions
     async def get_clients(self, request):
+        manager_data = []
+        for managers in self.orchestrator.managers_by_realm.values():
+            for manager in managers:
+                manager_data.append(manager.get_info_dict())
+
         return JsonResponse({
-            'clients': [client.get_info_dict() for client in self.orchestrator.managers.values()]
+            'clients': manager_data,
         })
 
     @jsonify_exceptions
@@ -72,7 +77,12 @@ class AlcazarAPI:
 
     @jsonify_exceptions
     async def get_client_debug(self, request):
-        manager = self.orchestrator.managers.get(request.match_info['client_name'])
+        name = request.match_info['client_name']
+        manager = None
+        for managers in self.orchestrator.managers_by_realm.values():
+            for realm_manager in managers:
+                if realm_manager.name == name:
+                    manager = realm_manager
         if not manager:
             return JsonResponse({'detail': 'Manager not found'}, status=404)
         return JsonResponse(manager.get_debug_dict(), compact=False)
@@ -113,14 +123,10 @@ class AlcazarAPI:
             return JsonResponse({'detail': 'Torrent not found.'}, status=404)
 
     @jsonify_exceptions
-    async def post_pop_updates(self, request):
-        limit = request.query.get('limit', 10000)
-        updated_dicts = self.orchestrator.pop_pooled_updates(limit)
-        removed_hashes = self.orchestrator.pop_pooled_removes()
-        return JsonResponse({
-            'updated': updated_dicts,
-            'removed': removed_hashes,
-        })
+    async def post_pop_update_batch(self, request):
+        limit = int(request.query.get('limit', '10000'))
+        realm_batches = self.orchestrator.pop_update_batch_dicts(limit)
+        return JsonResponse(realm_batches)
 
     def run(self):
         web.run_app(self.app, port=self.config.api_port)

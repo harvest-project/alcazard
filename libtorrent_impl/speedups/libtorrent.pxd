@@ -24,10 +24,3 @@ cdef extern from 'libtorrent/torrent_handle.hpp' namespace 'libtorrent':
 cdef extern from 'libtorrent/alert_types.hpp' namespace 'libtorrent':
     cdef struct torrent_added_alert:
         torrent_handle handle
-
-cdef extern from 'libtorrent/session_status.hpp' namespace 'libtorrent':
-    cdef struct session_status:
-        int64_t total_payload_download
-        int64_t total_payload_upload
-        int payload_download_rate
-        int payload_upload_rate

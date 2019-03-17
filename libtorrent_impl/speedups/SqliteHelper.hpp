@@ -9,30 +9,23 @@
 
 class SqliteStatement {
 public:
-
     sqlite3 *db;
     sqlite3_stmt *ptr;
 
     SqliteStatement(sqlite3 *db, std::string query);
-
     ~SqliteStatement();
 
     bool step();
-
     void reset();
 
     void clear_bindings();
-
     void bind_int(int col, int value);
-
     void bind_int64(int col, int64_t value);
-
     void bind_blob(int col, std::string value);
 
     bool get_is_null(int col);
-
+    int64_t get_int64(int col);
     std::string get_text(int col);
-
     std::string get_blob(int col);
 };
 

@@ -4,7 +4,7 @@ from asyncio import CancelledError
 from collections import defaultdict, Counter
 
 from alcazar_logging import BraceAdapter
-from clients import get_manager_types, TorrentNotFoundException
+from clients import get_manager_types, TorrentNotFoundException, TorrentBatchUpdate
 from models import DB
 
 logger = BraceAdapter(logging.getLogger(__name__))
@@ -21,11 +21,11 @@ class AlcazarOrchestrator:
         self.available_peer_ports = config.peer_ports
 
         self.manager_types = get_manager_types()
-        self.managers = {}
         self.managers_by_realm = defaultdict(list)
-        self.realm_info_hash_to_manager = defaultdict(dict)
-        self.pooled_updates = {}
-        self.pooled_removes = set()
+        self.realm_by_id = {}
+
+        self.realm_info_hash_manager = defaultdict(dict)
+        self.realm_accumulated_batch = defaultdict(TorrentBatchUpdate)
 
     def grab_local_port(self):
         return self.available_local_ports.pop()
@@ -38,7 +38,6 @@ class AlcazarOrchestrator:
             if __debug__:
                 logger.debug('Launching managers for {}', manager_class.__name__)
             config_type = manager_class.config_model
-
             for instance_config in config_type.select().order_by(config_type.id):
                 self._load_manager_for_config(manager_class, instance_config)
 
@@ -47,21 +46,18 @@ class AlcazarOrchestrator:
     async def _run(self):
         try:
             while True:
-                await self._run_iter()
-                await asyncio.sleep(0.5)
+                logger.debug('Iter :)')
+                await asyncio.sleep(0.1)
         except CancelledError:
             pass
 
-    async def _run_iter(self):
-        print('Iter :)')
-
-    def shutdown(self):
+    async def shutdown(self):
         logger.info('Shutting down orchestrator now...')
-        for manager in self.managers.values():
-            try:
-                manager.shutdown()
-            except Exception:
-                logger.exception('Manager failed shutdown')
+        tasks = []
+        for managers in self.managers_by_realm.values():
+            for manager in managers:
+                tasks.append(manager.shutdown())
+        await asyncio.gather(*tasks)
         logger.info('Clients are down.')
 
     def _load_manager_for_config(self, manager_class, instance_config):
@@ -69,16 +65,18 @@ class AlcazarOrchestrator:
             logger.debug('Launching manager {} for config id={}', manager_class.__name__, instance_config.id)
         manager = manager_class(self, instance_config)
         manager.launch()
-        self.managers[manager.name] = manager
-        self.managers_by_realm[instance_config.realm_id].append(manager)
+        self.managers_by_realm[instance_config.realm.id].append(manager)
+        self.realm_by_id[instance_config.realm.id] = instance_config.realm
         return manager
 
     @DB.atomic()
     def add_instance(self, realm, instance_type, config_kwargs):
-        logger.info('Adding instance {} to realm {}', instance_type, realm.name)
+        logger.info('Adding instance {} to realm {}.', instance_type, realm.name)
+        self.realm_by_id[realm.id] = realm
         manager = self.manager_types[instance_type]
         instance_config = manager.config_model.create_new(realm=realm, **config_kwargs)
         instance = self._load_manager_for_config(manager, instance_config)
+        logger.info('Created and started instance {}.'.format(instance.name))
         return instance
 
     async def add_torrent(self, realm, torrent, download_path, name):
@@ -88,59 +86,35 @@ class AlcazarOrchestrator:
         if not realm_managers:
             raise NoManagerForRealmException()
         # Get a dict {manager: count} for the torrent counts
-        torrent_counts = Counter(self.realm_info_hash_to_manager[realm.id].values())
+        torrent_counts = Counter(self.realm_info_hash_manager[realm.id].values())
         # Choose the manager with the smallest count from torrent_counts
         manager = min(realm_managers, key=lambda m: torrent_counts.get(m, 0))
         return await manager.add_torrent(torrent, download_path, name)
 
     async def delete_torrent(self, realm, info_hash):
         logger.info('Deleting torrent {} from realm {}', info_hash, realm)
-        manager = self.realm_info_hash_to_manager[realm.id].get(info_hash)
+        manager = self.realm_info_hash_manager[realm.id].get(info_hash)
         if not manager:
             raise TorrentNotFoundException()
         await manager.delete_torrent(info_hash)
 
-    def on_torrent_added(self, manager, data):
-        if __debug__:
-            logger.debug('Received torrent added from {} for {}', manager.name, data['info_hash'])
-
+    def on_torrent_batch_update(self, manager, batch):
+        logger.debug('Orchestrator received batch update with {} adds, {} updates and {} deletes'.format(
+            len(batch.added), len(batch.updated), len(batch.removed)))
         realm_id = manager.instance_config.realm_id
-        self.realm_info_hash_to_manager[realm_id][data['info_hash']] = manager
-        # For now, treat adds as updates, the difference is min
-        self.on_torrent_updated(manager, data)
+        info_hash_manager = self.realm_info_hash_manager[realm_id]
 
-    def on_torrent_updated(self, manager, data):
-        if __debug__:
-            logger.debug('Received torrent update from {} for {}', manager.name, data['info_hash'])
+        self.realm_accumulated_batch[realm_id].update(batch)
 
-        realm = manager.instance_config.realm
-        self.pooled_updates[data['info_hash']] = data
-        # Remove potential entries in pooled_removes, in case it's re-added before updates are fetched
-        self.pooled_removes.discard((realm.name, data['info_hash']))
+        for info_hash in batch.added.keys():
+            info_hash_manager[info_hash] = manager
+        for info_hash in batch.removed:
+            info_hash_manager.pop(info_hash, None)
 
-    def on_torrent_removed(self, manager, info_hash):
-        if __debug__:
-            logger.debug('Received torrent delete from {} for {}', manager.name, info_hash)
-
-        realm = manager.instance_config.realm
-
-        del self.realm_info_hash_to_manager[realm.id][info_hash]
-        # Discard any pooled updates we've had for this torrent
-        if info_hash in self.pooled_updates:
-            del self.pooled_updates[info_hash]
-        self.pooled_removes.add((realm.name, info_hash))
-
-    def pop_pooled_updates(self, limit):
-        if limit >= len(self.pooled_updates):
-            updates = list(self.pooled_updates.values())
-            self.pooled_updates.clear()
-        else:
-            updates = []
-            for _ in range(limit):
-                updates.append(self.pooled_updates.popitem()[1])
-        return updates
-
-    def pop_pooled_removes(self):
-        removes = list(self.pooled_removes)
-        self.pooled_removes.clear()
-        return removes
+    def pop_update_batch_dicts(self, limit):
+        result = {}
+        for realm_id, accumulated_batch in self.realm_accumulated_batch.items():
+            realm = self.realm_by_id[realm_id]
+            batch, limit = accumulated_batch.pop_batch(limit)
+            result[realm.name] = batch.to_dict()
+        return result

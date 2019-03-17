@@ -1,14 +1,18 @@
 #include <string>
-
+#include <algorithm>
 #include <sqlite3.h>
 #include <libtorrent/torrent_info.hpp>
 #include <libtorrent/hex.hpp>
 #include <libtorrent/error_code.hpp>
+#include <libtorrent/session_stats.hpp>
 
 #include "SqliteHelper.hpp"
+#include "Utils.hpp"
 #include "SessionWrapper.hpp"
 
 namespace lt = libtorrent;
+
+Logger logger("SessionWrapper");
 
 SessionWrapper::SessionWrapper(
         std::string db_path,
@@ -16,21 +20,29 @@ SessionWrapper::SessionWrapper(
         std::string listen_interfaces,
         bool enable_dht)
         : config_id(config_id), session(NULL), db(NULL) {
-    printf("Open sqlite3\n");
+    logger.debug("Opening SQLite DB.");
     SQLITE_CHECK(sqlite3_open_v2(db_path.c_str(), &this->db, SQLITE_OPEN_READWRITE, NULL));
 
+    lt::settings_pack pack = this->create_settings_pack();
+    pack.set_str(lt::settings_pack::listen_interfaces, listen_interfaces);
+    pack.set_bool(lt::settings_pack::enable_dht, enable_dht);
+
+    this->init_metrics_names();
+
+    logger.info("Creating libtorrent session.");
+    this->session = new libtorrent::session(pack);
+}
+
+lt::settings_pack SessionWrapper::create_settings_pack() {
+    lt::settings_pack pack;
     const int alert_mask =
             lt::alert::error_notification
             | lt::alert::tracker_notification
             | lt::alert::status_notification;
-
-    printf("New session %d\n", this->config_id);
-    lt::settings_pack pack;
+    // Basic settings
+    pack.set_int(lt::settings_pack::alert_mask, alert_mask);
     pack.set_str(lt::settings_pack::user_agent, "Deluge/1.2.15");
     pack.set_str(lt::settings_pack::peer_fingerprint, "-DE13F0-");
-    pack.set_int(lt::settings_pack::alert_mask, alert_mask);
-    pack.set_str(lt::settings_pack::listen_interfaces, listen_interfaces);
-    pack.set_bool(lt::settings_pack::enable_dht, enable_dht);
     pack.set_str(lt::settings_pack::dht_bootstrap_nodes,
                  "router.bittorrent.com:6881,router.utorrent.com:6881,router.bitcomet.com:6881,dht.transmissionbt.com:6881,"
                  "dht.aelitis.com:6881");
@@ -63,55 +75,67 @@ SessionWrapper::SessionWrapper(
     pack.set_int(lt::settings_pack::active_tracker_limit, -1);
     pack.set_int(lt::settings_pack::active_lsd_limit, -1);
     pack.set_int(lt::settings_pack::active_limit, -1);
+    return pack;
+}
 
-    this->session = new libtorrent::session(pack);
+void SessionWrapper::init_metrics_names() {
+    char name[128];
+    for (auto &metric : lt::session_stats_metrics()) {
+        snprintf(
+                name,
+                sizeof(name) / sizeof(name[0]),
+                "%s[%s]",
+                metric.name,
+                metric.type == lt::stats_metric::type_counter ? "counter" : "gauge"
+        );
+        this->metrics_names.push_back(std::make_pair(name, metric.value_index));
+    }
 }
 
 SessionWrapper::~SessionWrapper() {
     if (this->session) {
-        printf("Delete session\n");
         delete this->session;
     }
     if (this->db) {
-        printf("Delete db");
         // Discard error, since this is a destructor
         sqlite3_close_v2(this->db);
     }
 }
 
 void SessionWrapper::load_initial_torrents() {
-    std::vector <int64_t> ids;
-    SqliteStatement list_stmt(this->db, "SELECT id FROM libtorrenttorrent WHERE libtorrent_id = ?001");
-    list_stmt.bind_int64(1, this->config_id);
-    while (list_stmt.step()) {
-        ids.push_back(sqlite3_column_int64(list_stmt.ptr, 0));
-    }
-
-    printf("C++ received a total of %lu torrents\n", ids.size());
+    auto timer = timers.start_timer("load_initial_torrents");
+    logger.info("Loading initial torrents.");
+    this->timer_initial_torrents_received = timers.start_timer("initial_torrents_received");
 
     SqliteStatement fetch_stmt = SqliteStatement(
             this->db,
-            "SELECT torrent_file, download_path, name, resume_data FROM libtorrenttorrent WHERE id = ?001"
+            "SELECT id, torrent_file, download_path, name, resume_data FROM libtorrenttorrent WHERE libtorrent_id = ?001"
     );
-    for (auto id : ids) {
-        fetch_stmt.clear_bindings();
-        fetch_stmt.bind_int64(1, id);
-        while (fetch_stmt.step()) {
-            bool has_name = !fetch_stmt.get_is_null(2);
-            std::string name = has_name ? fetch_stmt.get_text(2) : "";
-            bool has_resume_data = !fetch_stmt.get_is_null(3);
-            std::string resume_data = has_resume_data ? fetch_stmt.get_blob(3) : "";
-            this->async_add_torrent(
-                    fetch_stmt.get_blob(0),
-                    fetch_stmt.get_blob(1),
-                    has_name ? &name : NULL,
-                    has_resume_data ? &resume_data : NULL
-            );
-        }
-        fetch_stmt.reset();
+    fetch_stmt.bind_int64(1, this->config_id);
+
+    int i = 0;
+    while (fetch_stmt.step()) {
+        if (i++ >= 30000) break;
+
+        logger.debug("Async adding torrent %lld.", fetch_stmt.get_int64(0));
+        this->num_waiting_initial_torrents++;
+        bool has_name = !fetch_stmt.get_is_null(3);
+        std::string name = has_name ? fetch_stmt.get_text(3) : "";
+        bool has_resume_data = !fetch_stmt.get_is_null(4);
+        std::string resume_data = has_resume_data ? fetch_stmt.get_blob(4) : "";
+
+        lt::add_torrent_params add_params;
+        this->init_add_params(
+                add_params,
+                fetch_stmt.get_blob(1),
+                fetch_stmt.get_blob(2),
+                has_name ? &name : NULL,
+                has_resume_data ? &resume_data : NULL
+        );
+        this->session->async_add_torrent(add_params);
     }
 
-    printf("C++ completed initial torrent load\n");
+    logger.info("Completed initial torrent load.");
 }
 
 void SessionWrapper::init_add_params(lt::add_torrent_params &params, std::string torrent, std::string download_path,
@@ -143,18 +167,18 @@ void SessionWrapper::async_add_torrent(
 }
 
 void SessionWrapper::post_torrent_updates() {
+    auto timer = timers.start_timer("post_torrent_updates");
     this->session->post_torrent_updates(0);
 }
 
 void SessionWrapper::pause() {
+    auto timer = timers.start_timer("pause");
+    logger.info("Pausing session.");
     this->session->pause();
 }
 
-int SessionWrapper::listen_port() {
-    return this->session->listen_port();
-}
-
 BatchTorrentUpdate SessionWrapper::process_alerts() {
+    auto timer = timers.start_timer("process_alerts");
     BatchTorrentUpdate update;
     std::vector < lt::alert * > alerts;
     this->session->pop_alerts(&alerts);
@@ -164,6 +188,8 @@ BatchTorrentUpdate SessionWrapper::process_alerts() {
             this->on_alert_add_torrent(&update, a);
         } else if (auto a = lt::alert_cast<lt::state_update_alert>(alert)) {
             this->on_alert_state_update(&update, a);
+        } else if (auto a = lt::alert_cast<lt::session_stats_alert>(alert)) {
+            this->on_alert_session_stats(&update, a);
         }
     }
 
@@ -174,11 +200,20 @@ BatchTorrentUpdate SessionWrapper::process_alerts() {
             status.handle = added_handle;
             added_statuses.push_back(status);
         }
-        this->session->refresh_torrent_status(&added_statuses, 0);
-        for (auto status : added_statuses) {
+        {
+            auto timer = timers.start_timer("refresh_new_statuses");
+            this->session->refresh_torrent_status(&added_statuses, 0);
+        }
+        for (auto &status : added_statuses) {
             TorrentState *state = this->handle_torrent_added(&status);
             update.added.push_back(state);
+            --this->num_waiting_initial_torrents;
         }
+    }
+
+    if (this->timer_initial_torrents_received && this->num_waiting_initial_torrents <= 0) {
+        logger.info("Received all initial torrents.");
+        this->timer_initial_torrents_received.reset();
     }
 
     return update;
@@ -186,7 +221,6 @@ BatchTorrentUpdate SessionWrapper::process_alerts() {
 
 TorrentState *SessionWrapper::handle_torrent_added(lt::torrent_status *status, std::string *torrent_file) {
     std::string info_hash = status->info_hash.to_string();
-//    printf("C++ torrent added %s\n", lt::to_hex(info_hash).c_str());
     if (this->torrent_states.find(info_hash) != this->torrent_states.end()) {
         throw std::runtime_error("Torrent already added");
     }
@@ -195,30 +229,43 @@ TorrentState *SessionWrapper::handle_torrent_added(lt::torrent_status *status, s
     return state;
 }
 
-lt::session_status SessionWrapper::status() {
-    return this->session->status();
+void SessionWrapper::post_session_stats() {
+    auto timer = timers.start_timer("post_session_stats");
+    return this->session->post_session_stats();
+}
+
+TimerStats SessionWrapper::get_timer_stats() {
+    return this->timers.stats;
 }
 
 void SessionWrapper::on_alert_add_torrent(BatchTorrentUpdate *update, lt::add_torrent_alert *alert) {
     if (alert->error) {
         // TODO: Describe the actual error
-        printf("LIBTORRENT ALERT ERROR %d\n", alert->error.value());
-        throw std::runtime_error("Libtorrent returned error adding torrent");
+        logger.error("Error adding torrent!");
+        throw std::runtime_error("Libtorrent returned error adding torrent.");
     }
     update->added_handles.push_back(alert->handle);
 }
 
 void SessionWrapper::on_alert_state_update(BatchTorrentUpdate *update, lt::state_update_alert *alert) {
-    printf("C++ Received state updates for %lu torrents.\n", alert->status.size());
-    for (auto status : alert->status) {
+    logger.debug("Received state updates for %lu torrents.", alert->status.size());
+    for (auto &status : alert->status) {
         std::string info_hash = status.info_hash.to_string();
-//        printf("C++ received state update for %s\n", lt::to_hex(info_hash).c_str());
         auto state = this->torrent_states.find(info_hash);
         if (state == this->torrent_states.end()) {
-            throw new std::runtime_error("Received update for unregistered torrent");
+            throw new std::runtime_error("Received update for unregistered torrent.");
         }
         if (state->second->update_from_status(&status)) {
             update->updated.push_back(state->second);
         }
     }
+}
+
+void SessionWrapper::on_alert_session_stats(BatchTorrentUpdate *update, lt::session_stats_alert *alert) {
+    logger.debug("Received session stats.");
+    for (auto &item : this->metrics_names) {
+        update->metrics[item.first] = alert->values[item.second];
+    }
+    // Piggyback a session stats update to post timers as well
+    update->timer_stats = this->timers.stats;
 }

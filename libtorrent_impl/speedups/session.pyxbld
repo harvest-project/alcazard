@@ -7,7 +7,7 @@ def make_ext(modname, pyxfilename):
     ext = Extension(
         name=modname,
         sources=[
-            'Logging.cpp',
+            'Utils.cpp',
             'SqliteHelper.cpp',
             'TorrentState.cpp',
             'SessionWrapper.cpp',

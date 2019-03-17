@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 
@@ -71,7 +72,9 @@ class AlcazarHost:
         api.run()
 
         if orchestrator:
-            orchestrator.shutdown()
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(orchestrator.shutdown())
 
         DB.close()
 
