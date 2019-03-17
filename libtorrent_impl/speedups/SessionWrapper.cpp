@@ -115,7 +115,7 @@ void SessionWrapper::load_initial_torrents() {
 
     int i = 0;
     while (fetch_stmt.step()) {
-        if (i++ >= 30000) break;
+        if (i++ >= 10000000) break;
 
         logger.debug("Async adding torrent %lld.", fetch_stmt.get_int64(0));
         this->num_waiting_initial_torrents++;
@@ -194,21 +194,21 @@ BatchTorrentUpdate SessionWrapper::process_alerts() {
     }
 
     if (update.added_handles.size()) {
-        std::vector <lt::torrent_status> added_statuses;
-        for (auto added_handle : update.added_handles) {
-            lt::torrent_status status;
-            status.handle = added_handle;
-            added_statuses.push_back(status);
-        }
-        {
-            auto timer = timers.start_timer("refresh_new_statuses");
-            this->session->refresh_torrent_status(&added_statuses, 0);
-        }
-        for (auto &status : added_statuses) {
-            TorrentState *state = this->handle_torrent_added(&status);
-            update.added.push_back(state);
-            --this->num_waiting_initial_torrents;
-        }
+//        std::vector <lt::torrent_status> added_statuses;
+//        for (auto added_handle : update.added_handles) {
+//            lt::torrent_status status;
+//            status.handle = added_handle;
+//            added_statuses.push_back(status);
+//        }
+//        {
+//            auto timer = timers.start_timer("refresh_new_statuses");
+//            this->session->refresh_torrent_status(&added_statuses, 0);
+//        }
+//        for (auto &status : added_statuses) {
+//            TorrentState *state = this->handle_torrent_added(&status);
+//            update.added.push_back(state);
+//            --this->num_waiting_initial_torrents;
+//        }
     }
 
     if (this->timer_initial_torrents_received && this->num_waiting_initial_torrents <= 0) {
@@ -253,9 +253,10 @@ void SessionWrapper::on_alert_state_update(BatchTorrentUpdate *update, lt::state
         std::string info_hash = status.info_hash.to_string();
         auto state = this->torrent_states.find(info_hash);
         if (state == this->torrent_states.end()) {
-            throw new std::runtime_error("Received update for unregistered torrent.");
-        }
-        if (state->second->update_from_status(&status)) {
+            TorrentState *state = this->handle_torrent_added(&status);
+            update->added.push_back(state);
+            --this->num_waiting_initial_torrents;
+        } else if (state->second->update_from_status(&status)) {
             update->updated.push_back(state->second);
         }
     }

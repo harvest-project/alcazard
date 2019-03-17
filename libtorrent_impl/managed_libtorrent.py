@@ -78,12 +78,7 @@ class ManagedLibtorrent(Manager):
             # Event loop might be closed
             self._event_loop = asyncio.get_event_loop()
             future = self._event_loop.run_in_executor(self._executor, fn, *args)
-
-        start = time.time()
-        logger.warning("START _EXEC {}", fn.__name__)
-        result = await future
-        logger.warning("END _EXEC {} TOOK {}", fn.__name__, time.time() - start)
-        return result
+        return await future
 
     @property
     def peer_port(self):

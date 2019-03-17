@@ -1,4 +1,4 @@
-# cython: language_level=3, profile=True, linetrace=True
+# cython: language_level=3
 import time
 
 from libc.stdint cimport int64_t, uint64_t
