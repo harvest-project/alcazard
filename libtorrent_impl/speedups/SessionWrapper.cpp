@@ -20,11 +20,12 @@ SessionWrapper::SessionWrapper(
         std::string db_path,
         std::string listen_interfaces,
         bool enable_dht)
-        : session(NULL), db(NULL) {
+        : session(NULL), db(NULL), num_initial_torrents(-1), num_loaded_initial_torrents(-2) {
     logger.debug("Opening SQLite DB.");
     SQLITE_CHECK(sqlite3_open_v2(db_path.c_str(), &this->db, SQLITE_OPEN_READWRITE, NULL));
 
-    lt::settings_pack pack = this->create_settings_pack();
+    lt::settings_pack pack;
+    this->init_settings_pack(&pack);
     pack.set_str(lt::settings_pack::listen_interfaces, listen_interfaces);
     pack.set_bool(lt::settings_pack::enable_dht, enable_dht);
 
@@ -34,49 +35,47 @@ SessionWrapper::SessionWrapper(
     this->session = new libtorrent::session(pack);
 }
 
-lt::settings_pack SessionWrapper::create_settings_pack() {
-    lt::settings_pack pack;
+void SessionWrapper::init_settings_pack(lt::settings_pack *pack) {
     const int alert_mask =
             lt::alert::error_notification
             | lt::alert::tracker_notification
             | lt::alert::status_notification;
     // Basic settings
-    pack.set_int(lt::settings_pack::alert_mask, alert_mask);
-    pack.set_str(lt::settings_pack::user_agent, "Deluge/1.2.15");
-    pack.set_str(lt::settings_pack::peer_fingerprint, "-DE13F0-");
-    pack.set_str(lt::settings_pack::dht_bootstrap_nodes,
+    pack->set_int(lt::settings_pack::alert_mask, alert_mask);
+    pack->set_str(lt::settings_pack::user_agent, "Deluge/1.2.15");
+    pack->set_str(lt::settings_pack::peer_fingerprint, "-DE13F0-");
+    pack->set_str(lt::settings_pack::dht_bootstrap_nodes,
                  "router.bittorrent.com:6881,router.utorrent.com:6881,router.bitcomet.com:6881,dht.transmissionbt.com:6881,"
                  "dht.aelitis.com:6881");
-    pack.set_int(lt::settings_pack::alert_queue_size, 4 * 1000 * 1000);
-    pack.set_int(lt::settings_pack::cache_size, 4096);
-    pack.set_int(lt::settings_pack::tick_interval, 1000);
-    pack.set_int(lt::settings_pack::connections_limit, 400);
-    pack.set_int(lt::settings_pack::listen_queue_size, 32);
-    pack.set_int(lt::settings_pack::checking_mem_usage, 2048);
-    pack.set_int(lt::settings_pack::aio_threads, 8);
-    pack.set_bool(lt::settings_pack::listen_system_port_fallback, false);
-    pack.set_int(lt::settings_pack::max_retry_port_bind, 0);
-    pack.set_int(lt::settings_pack::unchoke_slots_limit, 64);
+    pack->set_int(lt::settings_pack::alert_queue_size, 4 * 1000 * 1000);
+    pack->set_int(lt::settings_pack::cache_size, 4096);
+    pack->set_int(lt::settings_pack::tick_interval, 1000);
+    pack->set_int(lt::settings_pack::connections_limit, 400);
+    pack->set_int(lt::settings_pack::listen_queue_size, 32);
+    pack->set_int(lt::settings_pack::checking_mem_usage, 2048);
+    pack->set_int(lt::settings_pack::aio_threads, 8);
+    pack->set_bool(lt::settings_pack::listen_system_port_fallback, false);
+    pack->set_int(lt::settings_pack::max_retry_port_bind, 0);
+    pack->set_int(lt::settings_pack::unchoke_slots_limit, 64);
 
-    pack.set_int(lt::settings_pack::tracker_completion_timeout, 120);
-    pack.set_int(lt::settings_pack::tracker_receive_timeout, 60);
-    pack.set_int(lt::settings_pack::stop_tracker_timeout, 60);
+    pack->set_int(lt::settings_pack::tracker_completion_timeout, 120);
+    pack->set_int(lt::settings_pack::tracker_receive_timeout, 60);
+    pack->set_int(lt::settings_pack::stop_tracker_timeout, 0);
 
     // Slow torrents
-    pack.set_bool(lt::settings_pack::dont_count_slow_torrents, true);
-    pack.set_int(lt::settings_pack::auto_manage_startup, 60);
-    pack.set_int(lt::settings_pack::inactive_down_rate, 10 * 1024);
-    pack.set_int(lt::settings_pack::inactive_up_rate, 10 * 1024);
+    pack->set_bool(lt::settings_pack::dont_count_slow_torrents, true);
+    pack->set_int(lt::settings_pack::auto_manage_startup, 60);
+    pack->set_int(lt::settings_pack::inactive_down_rate, 10 * 1024);
+    pack->set_int(lt::settings_pack::inactive_up_rate, 10 * 1024);
 
     // Limits
-    pack.set_int(lt::settings_pack::active_downloads, 8);
-    pack.set_int(lt::settings_pack::active_seeds, -1);
-    pack.set_int(lt::settings_pack::active_checking, 32);
-    pack.set_int(lt::settings_pack::active_dht_limit, 1000);
-    pack.set_int(lt::settings_pack::active_tracker_limit, -1);
-    pack.set_int(lt::settings_pack::active_lsd_limit, -1);
-    pack.set_int(lt::settings_pack::active_limit, -1);
-    return pack;
+    pack->set_int(lt::settings_pack::active_downloads, 8);
+    pack->set_int(lt::settings_pack::active_seeds, -1);
+    pack->set_int(lt::settings_pack::active_checking, 32);
+    pack->set_int(lt::settings_pack::active_dht_limit, 1000);
+    pack->set_int(lt::settings_pack::active_tracker_limit, -1);
+    pack->set_int(lt::settings_pack::active_lsd_limit, -1);
+    pack->set_int(lt::settings_pack::active_limit, -1);
 }
 
 void SessionWrapper::init_metrics_names() {
@@ -103,21 +102,32 @@ SessionWrapper::~SessionWrapper() {
     }
 }
 
-void SessionWrapper::load_initial_torrents() {
+int SessionWrapper::load_initial_torrents() {
     auto timer = timers.start_timer("load_initial_torrents");
     logger.info("Loading initial torrents.");
-    this->timer_initial_torrents_received = timers.start_timer("initial_torrents_received");
+
+    if (this->num_initial_torrents == -1) {
+        this->timer_initial_torrents_received = timers.start_timer("initial_torrents_received");
+        SqliteStatement count_stmt = SqliteStatement(this->db, "SELECT COUNT(*) FROM torrent");
+        count_stmt.step();
+        this->num_loaded_initial_torrents = 0;
+        this->num_initial_torrents = (int)count_stmt.get_int64(0);
+    }
 
     SqliteStatement fetch_stmt = SqliteStatement(
             this->db, "SELECT id, torrent_file, download_path, name, resume_data FROM torrent");
 
-    int i = 0;
+    int loaded = 0;
     while (fetch_stmt.step()) {
-        if (i++ >= 10000000) break;
-
         int64_t row_id = fetch_stmt.get_int64(0);
+
+        if (this->loaded_torrent_ids.find(row_id) != this->loaded_torrent_ids.end()) {
+            continue;
+        }
+        if (++loaded > 5000) return this->loaded_torrent_ids.size();
+        this->loaded_torrent_ids.insert(row_id);
+
         logger.debug("Async adding torrent %lld.", row_id);
-        this->num_waiting_initial_torrents++;
         bool has_name = !fetch_stmt.get_is_null(3);
         std::string name = has_name ? fetch_stmt.get_text(3) : "";
         bool has_resume_data = !fetch_stmt.get_is_null(4);
@@ -136,6 +146,7 @@ void SessionWrapper::load_initial_torrents() {
     }
 
     logger.info("Completed initial torrent load.");
+    return this->loaded_torrent_ids.size();
 }
 
 void SessionWrapper::init_add_params(lt::add_torrent_params &params, std::string torrent, std::string download_path,
@@ -199,14 +210,20 @@ void SessionWrapper::pause() {
     this->session->pause();
 }
 
-BatchTorrentUpdate SessionWrapper::process_alerts() {
+BatchTorrentUpdate SessionWrapper::process_alerts(bool shutting_down) {
     auto timer = timers.start_timer("process_alerts");
     BatchTorrentUpdate update;
     std::vector < lt::alert * > alerts;
     this->session->pop_alerts(&alerts);
 
-    for (auto alert : alerts) {
-        this->dispatch_alert(&update, alert);
+    if (!shutting_down) {
+        for (auto alert : alerts) {
+            this->dispatch_alert(&update, alert);
+        }
+    } else {
+        for (auto alert : alerts) {
+            this->dispatch_alert_shutting_down(&update, alert);
+        }
     }
 
     // Those write to the DB, so execute them 10K at a time inside transactions.
@@ -221,7 +238,7 @@ BatchTorrentUpdate SessionWrapper::process_alerts() {
         }
     }
 
-    if (this->timer_initial_torrents_received && this->num_waiting_initial_torrents <= 0) {
+    if (this->timer_initial_torrents_received && this->num_loaded_initial_torrents >= this->num_initial_torrents) {
         logger.info("Received all initial torrents.");
         this->timer_initial_torrents_received.reset();
     }
@@ -297,7 +314,7 @@ void SessionWrapper::on_alert_state_update(BatchTorrentUpdate *update, lt::state
                 continue;
             }
             update->added.push_back(state);
-            --this->num_waiting_initial_torrents;
+            ++this->num_loaded_initial_torrents;
         } else if (state->second->update_from_status(&status)) {
             update->updated.push_back(state->second);
         }
@@ -315,6 +332,9 @@ void SessionWrapper::calculate_torrent_count_metrics(BatchTorrentUpdate *update)
         states[item.second->state]++;
     }
 
+    update->metrics["alcazar.torrents.count[gauge]"] = this->torrent_states.size();
+    update->metrics["alcazar.torrents.num_initial[gauge]"] = this->num_initial_torrents;
+    update->metrics["alcazar.torrents.num_loaded_initial[gauge]"] = this->num_loaded_initial_torrents;
     update->metrics["alcazar.torrents.tracker_status.pending[gauge]"] = tracker_statuses[TRACKER_STATUS_PENDING];
     update->metrics["alcazar.torrents.tracker_status.announcing[gauge]"] = tracker_statuses[TRACKER_STATUS_ANNOUNCING];
     update->metrics["alcazar.torrents.tracker_status.error[gauge]"] = tracker_statuses[TRACKER_STATUS_ERROR];
@@ -345,7 +365,7 @@ void SessionWrapper::on_alert_session_stats(BatchTorrentUpdate *update, lt::sess
 
 void SessionWrapper::on_alert_torrent_finished(BatchTorrentUpdate *update, lt::torrent_finished_alert *alert) {
     // Short-circuit while we're still in the loading phase, otherwise this is too slow.
-    if (this->num_waiting_initial_torrents > 0) {
+    if (this->num_loaded_initial_torrents < this->num_initial_torrents) {
         return;
     }
     auto status = alert->handle.status();

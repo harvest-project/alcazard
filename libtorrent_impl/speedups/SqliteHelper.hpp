@@ -2,6 +2,7 @@
 #define SQLITE_HELPER_HPP_
 
 #include <string>
+#include <stdexcept>
 #include <sqlite3.h>
 
 #define SQLITE_THROW() throw std::runtime_error(std::string(sqlite3_errmsg(this->db)))

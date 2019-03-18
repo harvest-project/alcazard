@@ -25,6 +25,7 @@ def make_ext(modname, pyxfilename):
             '-I/usr/local/Cellar/libtorrent-rasterbar/1.1.11/include/',
         ],
         libraries=[
+            'sqlite3',
             'torrent-rasterbar',
         ],
         extra_link_args=[

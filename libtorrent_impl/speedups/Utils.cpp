@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <ctime>
 #include <sys/time.h>
+#include <memory>
 
 #include "Utils.hpp"
 
@@ -31,7 +32,7 @@ void Logger::log_va(Level level, const char *format, va_list args) {
 
     fprintf(
             stderr,
-            "%s,%0.3d - %s - %s - ",
+            "%s,%03lu - %s - %s - ",
             dt,
             now.tv_usec / 1000,
             this->name.c_str(),

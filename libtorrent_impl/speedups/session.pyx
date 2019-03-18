@@ -68,13 +68,13 @@ cdef extern from "SessionWrapper.hpp":
                 cbool enable_dht,
         ) nogil except +
 
-        void load_initial_torrents() nogil except +
+        int load_initial_torrents() nogil except +
         shared_ptr[TorrentState] add_torrent(string torrent_file, string download_path, string *name) nogil except +
         void remove_torrent(string info_hash) nogil except +
         void post_torrent_updates() nogil except +
         void pause() nogil except +
         int listen_port() nogil except +
-        BatchTorrentUpdate process_alerts() nogil except +
+        BatchTorrentUpdate process_alerts(cbool shutting_down) nogil except +
         void post_session_stats() nogil except +
         void all_torrents_save_resume_data(cbool flush_cache) nogil except +
 
@@ -201,18 +201,18 @@ cdef class LibtorrentSession:
             self.manager._initialized = True
             self.manager._initialize_time_seconds = (timezone_now() - self.manager._launch_datetime).total_seconds()
 
-    def process_alerts(self):
+    def process_alerts(self, shutting_down):
         cdef:
+            cbool c_shutting_down = shutting_down
             BatchTorrentUpdate update
             dict state_dict
-
             dict added = {}
             dict updated = {}
             set removed = set()
 
         logger.debug('Processing alerts without gil')
         with nogil:
-            update = self.wrapper.process_alerts()
+            update = self.wrapper.process_alerts(c_shutting_down)
 
         logger.debug('Updating session metrics')
         self._update_session_metrics(update)
@@ -268,8 +268,10 @@ cdef class LibtorrentSession:
         pass
 
     def load_initial_torrents(self):
+        cdef int result
         with nogil:
-            self.wrapper.load_initial_torrents()
+            result = self.wrapper.load_initial_torrents()
+        return result
 
     def all_torrents_save_resume_data(self, flush_cache):
         cdef cbool c_flush_cache = flush_cache

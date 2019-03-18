@@ -21,13 +21,15 @@ private:
     libtorrent::session *session;
     sqlite3 *db;
     TimerAccumulator timers;
-    int num_waiting_initial_torrents = 0;
+    int num_initial_torrents;
+    int num_loaded_initial_torrents;
     std::shared_ptr <Timer> timer_initial_torrents_received;
     std::vector <std::pair<std::string, int>> metrics_names;
     std::unordered_map <std::string, int64_t> added_torrent_row_ids;
     std::unordered_set <std::string> info_hashes_resume_data_wait;
+    std::unordered_set <int64_t> loaded_torrent_ids;
 
-    lt::settings_pack create_settings_pack();
+    void init_settings_pack(lt::settings_pack *pack);
     void init_metrics_names();
     void init_add_params(lt::add_torrent_params &params, std::string torrent, std::string download_path,
                          std::string *name, std::string *resume_data);
@@ -68,6 +70,14 @@ private:
         }
     }
 
+    inline void dispatch_alert_shutting_down(BatchTorrentUpdate *update, lt::alert *alert) {
+        if (auto a = lt::alert_cast<lt::save_resume_data_alert>(alert)) {
+            update->save_resume_data_alerts.push_back(a);
+        } else if (auto a = lt::alert_cast<lt::save_resume_data_failed_alert>(alert)) {
+            this->on_alert_save_resume_data_failed(update, a);
+        }
+    }
+
 public:
     std::unordered_map <std::string, std::shared_ptr<TorrentState>> torrent_states;
 
@@ -78,7 +88,7 @@ public:
     );
     ~SessionWrapper();
 
-    void load_initial_torrents();
+    int load_initial_torrents();
     std::shared_ptr <TorrentState> add_torrent(
             std::string torrent,
             std::string download_path,
@@ -87,7 +97,7 @@ public:
     void remove_torrent(std::string info_hash);
     void post_torrent_updates();
     void pause();
-    BatchTorrentUpdate process_alerts();
+    BatchTorrentUpdate process_alerts(bool shutting_down);
     void post_session_stats();
     void all_torrents_save_resume_data(bool flush_cache);
 };

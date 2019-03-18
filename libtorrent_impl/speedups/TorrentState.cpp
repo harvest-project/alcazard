@@ -87,7 +87,7 @@ bool TorrentState::update_tracker_error(lt::tracker_error_alert *alert) {
             buffer,
             sizeof(buffer) / sizeof(buffer[0]),
             "%s (%s)",
-            lt::convert_from_native(alert->error.message()).c_str(),
+            alert->error.message().c_str(),
             host.c_str()
     );
 

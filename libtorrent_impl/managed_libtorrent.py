@@ -94,7 +94,19 @@ class ManagedLibtorrent(Manager):
     async def _load_initial_torrents(self):
         logger.info('Starting initial torrent load.')
         start = time.time()
-        await self._exec(self._session.load_initial_torrents)
+        num_loaded = await self._exec(self._session.load_initial_torrents)
+        while True:
+            if not self._metrics or num_loaded != self._metrics.get('alcazar.torrents.count[gauge]'):
+                logger.debug('Still waiting for batch to load.')
+                await asyncio.sleep(2)
+                continue
+
+            logger.info('Loading initial torrent batch...')
+            new_num_loaded = await self._exec(self._session.load_initial_torrents)
+            if new_num_loaded == num_loaded:
+                break
+            num_loaded = new_num_loaded
+            await asyncio.sleep(2)
         logger.info('Completed initial torrent load in {}.', time.time() - start)
 
     async def _loop(self):
@@ -103,7 +115,7 @@ class ManagedLibtorrent(Manager):
 
             try:
                 await self._run_periodic_tasks()
-                await self._process_alerts()
+                await self._process_alerts(shutting_down=False)
             except CancelledError:
                 break
             except Exception:
@@ -120,8 +132,8 @@ class ManagedLibtorrent(Manager):
                 logger.warning('Libtorrent slow loop for {} took {:.3f}', self._name, time_taken)
             await asyncio.sleep(max(0, params.LOOP_INTERVAL - time_taken))
 
-    async def _process_alerts(self):
-        await self._exec(self._session.process_alerts)
+    async def _process_alerts(self, shutting_down):
+        await self._exec(self._session.process_alerts, shutting_down)
 
     async def _post_torrent_updates(self):
         await self._exec(self._session.post_torrent_updates)
@@ -141,12 +153,12 @@ class ManagedLibtorrent(Manager):
         start = time.time()
         logger.debug("Triggering all torrents save resume before shutdown.")
         await self._exec(self._session.all_torrents_save_resume_data, True)
-        await self._process_alerts()  # Used to populate _num_waiting_for_resume_data
+        await self._process_alerts(shutting_down=True)  # Used to populate _num_waiting_for_resume_data
         logger.debug('Waiting for save resume data to complete. Running alert poll loop.')
         wait_start = time.time()
         while self._num_waiting_for_resume_data:
             logger.debug('Still waiting for {} resume data.', self._num_waiting_for_resume_data)
-            await self._process_alerts()
+            await self._process_alerts(shutting_down=True)
             await asyncio.sleep(params.LOOP_INTERVAL)
             if time.time() - wait_start > params.SHUTDOWN_TIMEOUT:
                 raise LibtorrentClientException('Shutdown timeout reached.')
