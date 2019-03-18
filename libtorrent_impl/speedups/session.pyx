@@ -64,7 +64,6 @@ cdef extern from "SessionWrapper.hpp":
 
         SessionWrapper(
                 string db_path,
-                int64_t config_id,
                 string listen_interfaces,
                 cbool enable_dht,
         ) nogil except +
@@ -94,7 +93,7 @@ cdef class LibtorrentSession:
         SessionWrapper *wrapper
         str name
 
-    def __init__(self, manager, str db_path, int64_t config_id, str listen_interfaces, cbool enable_dht):
+    def __init__(self, manager, str db_path, str listen_interfaces, cbool enable_dht):
         cdef:
             string c_db_path = db_path.encode()
             string c_listen_interfaces = listen_interfaces.encode()
@@ -113,7 +112,6 @@ cdef class LibtorrentSession:
         with nogil:
             self.wrapper = new SessionWrapper(
                 c_db_path,
-                config_id,
                 c_listen_interfaces,
                 enable_dht,
             )

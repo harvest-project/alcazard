@@ -22,23 +22,20 @@ TorrentState::TorrentState(int64_t row_id, lt::torrent_status *status)
     this->update_from_status(status);
 }
 
-void TorrentState::insert_db_row(sqlite3 *db, int64_t config_id, std::string torrent_file, std::string download_path,
+void TorrentState::insert_db_row(sqlite3 *db, std::string torrent_file, std::string download_path,
                                  std::string *name_ptr) {
     SqliteStatement stmt = SqliteStatement(
-            db,
-            "INSERT INTO libtorrenttorrent (libtorrent_id, info_hash, torrent_file, download_path, name)"
-            " VALUES (?001, ?002, ?003, ?004, ?005)");
+            db, "INSERT INTO torrent (info_hash, torrent_file, download_path, name) VALUES (?001, ?002, ?003, ?004)");
 
     std::string name;
     std::string info_hash_str = lt::to_hex(this->info_hash);
 
-    stmt.bind_int64(1, config_id);
-    stmt.bind_blob(2, info_hash_str.c_str());
-    stmt.bind_blob(3, torrent_file);
-    stmt.bind_text(4, download_path);
+    stmt.bind_blob(1, info_hash_str.c_str());
+    stmt.bind_blob(2, torrent_file);
+    stmt.bind_text(3, download_path);
     if (name_ptr) {
         name = *name_ptr;
-        stmt.bind_text(5, name.c_str());
+        stmt.bind_text(4, name.c_str());
     }
     this->row_id = stmt.insert();
 }
@@ -48,9 +45,9 @@ void TorrentState::delete_db_row(sqlite3 *db) {
         TorrentState::logger.error("Trying to delete_db_row for TorrentState with id -1.");
         return;
     }
-    SqliteStatement stmt = SqliteStatement(db, "DELETE FROM libtorrenttorrent WHERE id = ?001");
+    SqliteStatement stmt = SqliteStatement(db, "DELETE FROM torrent WHERE id = ?001");
     stmt.bind_int64(1, this->row_id);
-    stmt.exec_delete();
+    stmt.exec();
     this->row_id = -1;
 }
 

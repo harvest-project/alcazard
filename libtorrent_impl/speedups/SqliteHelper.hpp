@@ -19,7 +19,7 @@ public:
     void reset();
     int update();
     int64_t insert();
-    void exec_delete();
+    void exec();
 
     void clear_bindings();
     void bind_int(int col, int value);
@@ -31,6 +31,15 @@ public:
     int64_t get_int64(int col);
     std::string get_text(int col);
     std::string get_blob(int col);
+};
+
+class SqliteTransaction {
+public:
+    sqlite3 *db;
+
+    SqliteTransaction(sqlite3 *db);
+    ~SqliteTransaction();
+    void commit();
 };
 
 #endif

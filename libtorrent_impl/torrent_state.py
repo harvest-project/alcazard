@@ -1,7 +1,7 @@
 from clients import TorrentState, FieldInfo
+from libtorrent_impl.lt_models import Torrent
 from libtorrent_impl.params import STATUS_MAPPING
 from libtorrent_impl.utils import LibtorrentClientException, format_tracker_error
-from models import LibtorrentTorrent
 
 
 def _convert_status(state):
@@ -46,16 +46,12 @@ class LibtorrentTorrentState(TorrentState):
 
     def _load_or_create_db_torrent(self, torrent_file, download_path):
         try:
-            return LibtorrentTorrent.select().where(
-                LibtorrentTorrent.libtorrent == self.manager.instance_config,
-                LibtorrentTorrent.info_hash == self.info_hash,
-            ).get()
-        except LibtorrentTorrent.DoesNotExist:
+            return Torrent.select().where(Torrent.info_hash == self.info_hash).get()
+        except Torrent.DoesNotExist:
             if not torrent_file or not download_path:
                 raise LibtorrentClientException(
                     'Creating a new LibtorrentTorrent without supplying torrent_file and download_path.')
-            return LibtorrentTorrent.create(
-                libtorrent=self.manager.instance_config,
+            return Torrent.create(
                 info_hash=self.info_hash,
                 torrent_file=torrent_file,
                 download_path=download_path,

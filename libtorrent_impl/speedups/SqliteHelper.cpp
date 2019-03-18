@@ -41,9 +41,9 @@ int64_t SqliteStatement::insert() {
     return sqlite3_last_insert_rowid(this->db);
 }
 
-void SqliteStatement::exec_delete() {
+void SqliteStatement::exec() {
     if (this->step()) {
-        throw std::runtime_error("Step returned row on DELETE.");
+        throw std::runtime_error("Step returned row on exec().");
     }
 }
 
@@ -85,4 +85,25 @@ std::string SqliteStatement::get_blob(int col) {
     int length = sqlite3_column_bytes(this->ptr, col);
     if (!length) return "";
     return std::string((char *) sqlite3_column_blob(this->ptr, col), length);
+}
+
+SqliteTransaction::SqliteTransaction(sqlite3 *db) : db(db) {
+    auto stmt = SqliteStatement(this->db, "BEGIN");
+    stmt.exec();
+}
+
+SqliteTransaction::~SqliteTransaction() {
+    auto stmt = SqliteStatement(this->db, "COMMIT");
+    stmt.exec();
+}
+
+void SqliteTransaction::commit() {
+    {
+        auto stmt = SqliteStatement(this->db, "COMMIT");
+        stmt.exec();
+    }
+    {
+        auto stmt = SqliteStatement(this->db, "BEGIN");
+        stmt.exec();
+    }
 }

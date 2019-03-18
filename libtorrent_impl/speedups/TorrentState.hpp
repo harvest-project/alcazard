@@ -50,8 +50,7 @@ public:
     std::string tracker_error;
 
     TorrentState(int64_t row_id, lt::torrent_status *status);
-    void insert_db_row(sqlite3 *db, int64_t config_id, std::string torrent_file, std::string download_path,
-                       std::string *name_ptr);
+    void insert_db_row(sqlite3 *db, std::string torrent_file, std::string download_path, std::string *name_ptr);
     void delete_db_row(sqlite3 *db);
     bool update_from_status(lt::torrent_status *status);
     bool update_tracker_announce();
@@ -68,6 +67,8 @@ public:
     std::unordered_map <std::string, uint64_t> metrics;
     std::unordered_map <std::string, TimerStat> timer_stats;
     int num_waiting_for_resume_data;
+
+    std::vector <lt::save_resume_data_alert*> save_resume_data_alerts;
 };
 
 inline Status get_alcazar_status(lt::torrent_status::state_t state) {

@@ -118,22 +118,6 @@ class ManagedLibtorrentConfig(ManagerConfig, peewee.Model):
         database = DB
 
 
-class LibtorrentTorrent(peewee.Model):
-    libtorrent = peewee.ForeignKeyField(ManagedLibtorrentConfig, backref='torrents')
-
-    info_hash = peewee.CharField(max_length=40, index=True)
-    torrent_file = peewee.BlobField()
-    download_path = peewee.TextField()
-    name = peewee.TextField(null=True)
-    resume_data = peewee.BlobField(null=True)
-
-    class Meta:
-        database = DB
-        indexes = (
-            (('libtorrent', 'info_hash'), True),
-        )
-
-
 class Migration(peewee.Model):
     name = peewee.CharField(max_length=256)
 
@@ -147,6 +131,9 @@ MODELS = [
     ManagedTransmissionConfig,
     RemoteTransmissionConfig,
     ManagedLibtorrentConfig,
-    LibtorrentTorrent,
     Migration,
+]
+
+MIGRATIONS = [
+    ('0001_initial', lambda: None),
 ]

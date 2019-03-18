@@ -18,10 +18,9 @@ Logger logger("SessionWrapper");
 
 SessionWrapper::SessionWrapper(
         std::string db_path,
-        int64_t config_id,
         std::string listen_interfaces,
         bool enable_dht)
-        : config_id(config_id), session(NULL), db(NULL) {
+        : session(NULL), db(NULL) {
     logger.debug("Opening SQLite DB.");
     SQLITE_CHECK(sqlite3_open_v2(db_path.c_str(), &this->db, SQLITE_OPEN_READWRITE, NULL));
 
@@ -110,10 +109,7 @@ void SessionWrapper::load_initial_torrents() {
     this->timer_initial_torrents_received = timers.start_timer("initial_torrents_received");
 
     SqliteStatement fetch_stmt = SqliteStatement(
-            this->db,
-            "SELECT id, torrent_file, download_path, name, resume_data FROM libtorrenttorrent WHERE libtorrent_id = ?001"
-    );
-    fetch_stmt.bind_int64(1, this->config_id);
+            this->db, "SELECT id, torrent_file, download_path, name, resume_data FROM torrent");
 
     int i = 0;
     while (fetch_stmt.step()) {
@@ -170,7 +166,7 @@ std::shared_ptr <TorrentState> SessionWrapper::add_torrent(
     lt::torrent_status status = handle.status();
     std::string info_hash = status.info_hash.to_string();
     std::shared_ptr <TorrentState> state = std::make_shared<TorrentState>(-1, &status);
-    state->insert_db_row(this->db, this->config_id, torrent_file, download_path, name);
+    state->insert_db_row(this->db, torrent_file, download_path, name);
     this->torrent_states[info_hash] = state;
     return state;
 }
@@ -210,26 +206,18 @@ BatchTorrentUpdate SessionWrapper::process_alerts() {
     this->session->pop_alerts(&alerts);
 
     for (auto alert : alerts) {
-        if (auto a = lt::alert_cast<lt::add_torrent_alert>(alert)) {
-            this->on_alert_add_torrent(&update, a);
-        } else if (auto a = lt::alert_cast<lt::state_update_alert>(alert)) {
-            this->on_alert_state_update(&update, a);
-        } else if (auto a = lt::alert_cast<lt::session_stats_alert>(alert)) {
-            this->on_alert_session_stats(&update, a);
-        } else if (auto a = lt::alert_cast<lt::torrent_finished_alert>(alert)) {
-            this->on_alert_torrent_finished(&update, a);
-        } else if (auto a = lt::alert_cast<lt::save_resume_data_alert>(alert)) {
-            this->on_alert_save_resume_data(&update, a);
-        } else if (auto a = lt::alert_cast<lt::save_resume_data_failed_alert>(alert)) {
-            this->on_alert_save_resume_data_failed(&update, a);
-        } else if (auto a = lt::alert_cast<lt::tracker_announce_alert>(alert)) {
-            this->on_alert_tracker_announce(&update, a);
-        } else if (auto a = lt::alert_cast<lt::tracker_reply_alert>(alert)) {
-            this->on_alert_tracker_reply(&update, a);
-        } else if (auto a = lt::alert_cast<lt::tracker_error_alert>(alert)) {
-            this->on_alert_tracker_error(&update, a);
-        } else if (auto a = lt::alert_cast<lt::torrent_removed_alert>(alert)) {
-            this->on_alert_torrent_removed(&update, a);
+        this->dispatch_alert(&update, alert);
+    }
+
+    // Those write to the DB, so execute them 10K at a time inside transactions.
+    if (update.save_resume_data_alerts.size()) {
+        auto transaction = SqliteTransaction(this->db);
+        int num_alerts = 0;
+        for (auto alert : update.save_resume_data_alerts) {
+            this->on_alert_save_resume_data(&update, alert);
+            if (++num_alerts % 10000 == 0) {
+                transaction.commit();
+            }
         }
     }
 
@@ -393,7 +381,7 @@ void SessionWrapper::on_alert_save_resume_data(BatchTorrentUpdate *update, lt::s
 
     std::string resume_data;
     lt::bencode(std::back_inserter(resume_data), *alert->resume_data);
-    SqliteStatement stmt = SqliteStatement(this->db, "UPDATE libtorrenttorrent SET resume_data = ?001 WHERE id = ?002");
+    SqliteStatement stmt = SqliteStatement(this->db, "UPDATE torrent SET resume_data = ?001 WHERE id = ?002");
     stmt.bind_blob(1, resume_data);
     stmt.bind_int64(2, state_item->second->row_id);
     int num_changes = stmt.update();
@@ -442,7 +430,7 @@ void SessionWrapper::on_alert_tracker_reply(BatchTorrentUpdate *update, lt::trac
 void SessionWrapper::on_alert_tracker_error(BatchTorrentUpdate *update, lt::tracker_error_alert *alert) {
     auto info_hash = alert->handle.info_hash().to_string();
     if (logger.is_enabled_for(Logger::DEBUG)) {
-        logger.debug("Received tracker reply for %s.", lt::to_hex(info_hash).c_str());
+        logger.debug("Received tracker error for %s.", lt::to_hex(info_hash).c_str());
     }
     auto state_item = this->torrent_states.find(info_hash);
     if (state_item != this->torrent_states.end() && state_item->second->update_tracker_error(alert)) {

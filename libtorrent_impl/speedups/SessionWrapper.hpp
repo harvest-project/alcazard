@@ -18,7 +18,6 @@ namespace lt = libtorrent;
 
 class SessionWrapper {
 private:
-    int64_t config_id;
     libtorrent::session *session;
     sqlite3 *db;
     TimerAccumulator timers;
@@ -45,12 +44,35 @@ private:
     void on_alert_tracker_error(BatchTorrentUpdate *update, lt::tracker_error_alert *alert);
     void on_alert_torrent_removed(BatchTorrentUpdate *update, lt::torrent_removed_alert *alert);
 
+    inline void dispatch_alert(BatchTorrentUpdate *update, lt::alert *alert) {
+        if (auto a = lt::alert_cast<lt::add_torrent_alert>(alert)) {
+            this->on_alert_add_torrent(update, a);
+        } else if (auto a = lt::alert_cast<lt::state_update_alert>(alert)) {
+            this->on_alert_state_update(update, a);
+        } else if (auto a = lt::alert_cast<lt::session_stats_alert>(alert)) {
+            this->on_alert_session_stats(update, a);
+        } else if (auto a = lt::alert_cast<lt::torrent_finished_alert>(alert)) {
+            this->on_alert_torrent_finished(update, a);
+        } else if (auto a = lt::alert_cast<lt::save_resume_data_alert>(alert)) {
+            update->save_resume_data_alerts.push_back(a);
+        } else if (auto a = lt::alert_cast<lt::save_resume_data_failed_alert>(alert)) {
+            this->on_alert_save_resume_data_failed(update, a);
+        } else if (auto a = lt::alert_cast<lt::tracker_announce_alert>(alert)) {
+            this->on_alert_tracker_announce(update, a);
+        } else if (auto a = lt::alert_cast<lt::tracker_reply_alert>(alert)) {
+            this->on_alert_tracker_reply(update, a);
+        } else if (auto a = lt::alert_cast<lt::tracker_error_alert>(alert)) {
+            this->on_alert_tracker_error(update, a);
+        } else if (auto a = lt::alert_cast<lt::torrent_removed_alert>(alert)) {
+            this->on_alert_torrent_removed(update, a);
+        }
+    }
+
 public:
     std::unordered_map <std::string, std::shared_ptr<TorrentState>> torrent_states;
 
     SessionWrapper(
             std::string db_path,
-            int64_t config_id,
             std::string listen_interfaces,
             bool enable_dht
     );

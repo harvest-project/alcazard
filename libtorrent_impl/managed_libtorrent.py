@@ -1,38 +1,40 @@
 import asyncio
 import logging
+import os
 import time
 import traceback
 from asyncio import CancelledError
-from collections import Counter
 from concurrent.futures.thread import ThreadPoolExecutor
 
+import peewee
+
+import migrations
+import models
 from alcazar_logging import BraceAdapter
 from clients import Manager, PeriodicTaskInfo, TorrentBatchUpdate
 from error_manager import Severity
-from libtorrent_impl import params
+from libtorrent_impl import params, lt_models
 from libtorrent_impl.speedups import session
-from libtorrent_impl.torrent_state import LibtorrentTorrentState
 from libtorrent_impl.utils import LibtorrentClientException
-from models import ManagedLibtorrentConfig
 
 logger = BraceAdapter(logging.getLogger(__name__))
 
 
 class ManagedLibtorrent(Manager):
     key = 'managed_libtorrent'
-    config_model = ManagedLibtorrentConfig
+    config_model = models.ManagedLibtorrentConfig
 
     def __init__(self, orchestrator, instance_config):
         super().__init__(orchestrator, instance_config)
 
+        self._state_path = os.path.join(self.config.state_path, self._name, 'db.sqlite3')
         self._peer_port = None
         self._session = None
-        self._torrent_states = {}
         # Timestamp (float) of when the last torrent updates request was posted.
         self._last_post_updates_request = None
         # Timestamp (float) of when the last resume data save was triggered
         self._last_save_resume_data_request = None
-        # Used to cache LibtorrentTorrent model instances that we add during startup to avoid issuing N selects
+        # Used to cache Torrent model instances that we add during startup to avoid issuing N selects
         self._libtorrent_torrent_by_info_hash = {}
         # Number of torrents waiting for resume data. Used during shutdown.
         self._num_waiting_for_resume_data = 0
@@ -40,8 +42,6 @@ class ManagedLibtorrent(Manager):
         self._metrics = None
         # Timer stats from the C++ session manager
         self._timer_stats = None
-        # Listen port to be set by the first iteration of update_session_stats
-        self._listen_port = None
 
         self._periodic_tasks.append(PeriodicTaskInfo(self._post_torrent_updates, params.POST_UPDATES_INTERVAL))
         self._save_resume_data_task = PeriodicTaskInfo(self._periodic_resume_save, params.SAVE_RESUME_DATA_INTERVAL)
@@ -64,13 +64,18 @@ class ManagedLibtorrent(Manager):
 
     @property
     def peer_port(self):
-        return self._listen_port
+        return self._peer_port
 
     def launch(self):
         super().launch()
 
-        self._peer_port = self._orchestrator.grab_peer_port()
+        logger.debug('Initializing DB for libtorrent at {}.'.format(self._state_path))
+        db = peewee.SqliteDatabase(self._state_path)
+        lt_models.LT_DB.initialize(db)
+        with db:
+            migrations.apply_migrations(lt_models.LT_DB, lt_models.LT_MODELS, lt_models.LT_MIGRATIONS)
 
+        self._peer_port = self._orchestrator.grab_peer_port()
         logger.debug('Received peer_port={} for {}', self._peer_port, self._name)
 
         # Reset the timer for saving fast resume data when launched, no need to do it immediately.
@@ -78,8 +83,7 @@ class ManagedLibtorrent(Manager):
 
         self._session = session.LibtorrentSession(
             manager=self,
-            db_path=self.config.db_path,
-            config_id=self.instance_config.id,
+            db_path=self._state_path,
             listen_interfaces='0.0.0.0:{0},[::]:{0}'.format(self._peer_port),
             enable_dht=self.config.is_dht_enabled,
         )
@@ -163,21 +167,8 @@ class ManagedLibtorrent(Manager):
         return data
 
     def get_debug_dict(self):
-        def _get_tracker_status(ts):
-            return {
-                LibtorrentTorrentState.TRACKER_PENDING: 'pending',
-                LibtorrentTorrentState.TRACKER_ANNOUNCING: 'announcing',
-                LibtorrentTorrentState.TRACKER_SUCCESS: 'success',
-                LibtorrentTorrentState.TRACKER_ERROR: 'error',
-            }[ts.tracker_status]
-
         data = super().get_debug_dict()
         data.update({
-            'num_torrent_per_state': Counter([ts.state for ts in self._torrent_states.values()]),
-            'torrents_with_errors': len([None for state in self._torrent_states.values() if state.error]),
-            'torrent_error_types': Counter([ts.error for ts in self._torrent_states.values()]),
-            'torrent_tracker_error_types': Counter([ts.tracker_error for ts in self._torrent_states.values()]),
-            'torrent_tracker_statuses': Counter([_get_tracker_status(ts) for ts in self._torrent_states.values()]),
             'metrics': dict(sorted(self._metrics.items())) if self._metrics else None,
             # 'settings': dict(sorted(self._session.get_settings().items())),
             'timer_stats': self._timer_stats,

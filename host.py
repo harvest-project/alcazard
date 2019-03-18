@@ -5,7 +5,7 @@ import os
 from alcazar_logging import BraceAdapter
 from api import AlcazarAPI
 from migrations import apply_migrations
-from models import DB, Config, MODELS
+from models import DB, Config, MODELS, MIGRATIONS
 from orchestrator import AlcazarOrchestrator
 from utils import DEFAULT_PORT
 
@@ -18,8 +18,7 @@ class AlcazarHost:
         self.db_path = os.path.join(state_path, 'db.sqlite3')
 
     def _init_db(self):
-        DB.create_tables(MODELS)
-        apply_migrations()
+        apply_migrations(DB, MODELS, MIGRATIONS)
 
     def config(self, api_port):
         logger.info('Configuring alcazard with state at {}', self.state_path)
