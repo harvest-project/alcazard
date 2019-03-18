@@ -64,13 +64,14 @@ cdef extern from "SessionWrapper.hpp":
 
         SessionWrapper(
                 string db_path,
-                int config_id,
+                int64_t config_id,
                 string listen_interfaces,
                 cbool enable_dht,
         ) nogil except +
 
         void load_initial_torrents() nogil except +
-        void async_add_torrent(string bytes, string download_path, string *name, string *resume_data) nogil except +
+        shared_ptr[TorrentState] add_torrent(string torrent_file, string download_path, string *name) nogil except +
+        void remove_torrent(string info_hash) nogil except +
         void post_torrent_updates() nogil except +
         void pause() nogil except +
         int listen_port() nogil except +
@@ -93,7 +94,7 @@ cdef class LibtorrentSession:
         SessionWrapper *wrapper
         str name
 
-    def __init__(self, manager, str db_path, int config_id, str listen_interfaces, cbool enable_dht):
+    def __init__(self, manager, str db_path, int64_t config_id, str listen_interfaces, cbool enable_dht):
         cdef:
             string c_db_path = db_path.encode()
             string c_listen_interfaces = listen_interfaces.encode()
@@ -130,6 +131,10 @@ cdef class LibtorrentSession:
             self.wrapper.pause()
 
     cdef dict torrent_state_to_dict(self, shared_ptr[TorrentState] state):
+        cdef:
+            string error = deref(state).error
+            string tracker_error = deref(state).tracker_error
+
         return {
             'info_hash': to_hex(deref(state).info_hash).decode(),
             'client': self.name,
@@ -142,8 +147,8 @@ cdef class LibtorrentSession:
             'download_rate': deref(state).download_rate,
             'upload_rate': deref(state).upload_rate,
             'progress': deref(state).progress,
-            'error': deref(state).error if deref(state).error.size() else None,
-            'tracker_error': deref(state).tracker_error if deref(state).tracker_error.size() else None,
+            'error': error.decode() if error.size() else None,
+            'tracker_error': tracker_error.decode() if tracker_error.size() else None,
             'date_added': None,
         }
 
@@ -232,24 +237,31 @@ cdef class LibtorrentSession:
         self.orchestrator.on_torrent_batch_update(self.manager, TorrentBatchUpdate(added, updated, removed))
         logger.debug('Batch is processed')
 
-    def async_add_torrent(self, bytes torrent, str download_path, str name, bytes resume_data):
+    def add_torrent(self, bytes torrent_file, str download_path, str name):
         cdef:
-            string c_torrent = torrent
+            string c_torrent_file = torrent_file
             string c_download_path = download_path.encode()
             string c_name
             string c_resume_data
+            shared_ptr[TorrentState] result
         if name:
-            c_name = name
-        if resume_data:
-            c_resume_data = resume_data
+            c_name = name.encode()
 
         with nogil:
-            self.wrapper.async_add_torrent(
-                c_torrent,
+            result = self.wrapper.add_torrent(
+                c_torrent_file,
                 c_download_path,
                 &c_name if name is not None else NULL,
-                &c_resume_data if resume_data is not None else NULL,
             )
+
+        return self.torrent_state_to_dict(result)
+
+    def remove_torrent(self, str info_hash):
+        cdef:
+            string c_info_hash = info_hash.encode()
+
+        with nogil:
+            self.wrapper.remove_torrent(c_info_hash)
 
     def post_session_stats(self):
         self.wrapper.post_session_stats()

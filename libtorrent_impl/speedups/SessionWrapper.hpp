@@ -18,7 +18,7 @@ namespace lt = libtorrent;
 
 class SessionWrapper {
 private:
-    int config_id;
+    int64_t config_id;
     libtorrent::session *session;
     sqlite3 *db;
     TimerAccumulator timers;
@@ -43,25 +43,26 @@ private:
     void on_alert_tracker_announce(BatchTorrentUpdate *update, lt::tracker_announce_alert *alert);
     void on_alert_tracker_reply(BatchTorrentUpdate *update, lt::tracker_reply_alert *alert);
     void on_alert_tracker_error(BatchTorrentUpdate *update, lt::tracker_error_alert *alert);
+    void on_alert_torrent_removed(BatchTorrentUpdate *update, lt::torrent_removed_alert *alert);
 
 public:
     std::unordered_map <std::string, std::shared_ptr<TorrentState>> torrent_states;
 
     SessionWrapper(
             std::string db_path,
-            int config_id,
+            int64_t config_id,
             std::string listen_interfaces,
             bool enable_dht
     );
     ~SessionWrapper();
 
     void load_initial_torrents();
-    void async_add_torrent(
+    std::shared_ptr <TorrentState> add_torrent(
             std::string torrent,
             std::string download_path,
-            std::string *name,
-            std::string *resume_data
+            std::string *name
     );
+    void remove_torrent(std::string info_hash);
     void post_torrent_updates();
     void pause();
     BatchTorrentUpdate process_alerts();

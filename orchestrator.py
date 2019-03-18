@@ -79,7 +79,7 @@ class AlcazarOrchestrator:
         logger.info('Created and started instance {}.'.format(instance.name))
         return instance
 
-    async def add_torrent(self, realm, torrent, download_path, name):
+    async def add_torrent(self, realm, torrent_file, download_path, name):
         logger.info('Adding torrent to realm {}', realm)
         # Get the managers that we're interested in (chosen realm)
         realm_managers = self.managers_by_realm[realm.id]
@@ -89,14 +89,16 @@ class AlcazarOrchestrator:
         torrent_counts = Counter(self.realm_info_hash_manager[realm.id].values())
         # Choose the manager with the smallest count from torrent_counts
         manager = min(realm_managers, key=lambda m: torrent_counts.get(m, 0))
-        return await manager.add_torrent(torrent, download_path, name)
+        return await manager.add_torrent(torrent_file, download_path, name)
 
-    async def delete_torrent(self, realm, info_hash):
-        logger.info('Deleting torrent {} from realm {}', info_hash, realm)
+    async def remove_torrent(self, realm, info_hash):
+        logger.info('Removing torrent {} from realm {}', info_hash, realm)
         manager = self.realm_info_hash_manager[realm.id].get(info_hash)
         if not manager:
             raise TorrentNotFoundException()
-        await manager.delete_torrent(info_hash)
+        if not manager.initialized:
+            raise Exception('Trying to remove a torrent from a manager that is not fully initialized.')
+        await manager.remove_torrent(info_hash)
 
     def on_torrent_batch_update(self, manager, batch):
         logger.debug('Orchestrator received batch update with {} adds, {} updates and {} deletes'.format(

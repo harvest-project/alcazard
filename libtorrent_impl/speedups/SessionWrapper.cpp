@@ -18,7 +18,7 @@ Logger logger("SessionWrapper");
 
 SessionWrapper::SessionWrapper(
         std::string db_path,
-        int config_id,
+        int64_t config_id,
         std::string listen_interfaces,
         bool enable_dht)
         : config_id(config_id), session(NULL), db(NULL) {
@@ -160,14 +160,35 @@ void SessionWrapper::init_add_params(lt::add_torrent_params &params, std::string
     }
 }
 
-void SessionWrapper::async_add_torrent(
-        std::string torrent,
+std::shared_ptr <TorrentState> SessionWrapper::add_torrent(
+        std::string torrent_file,
         std::string download_path,
-        std::string *name,
-        std::string *resume_data) {
+        std::string *name) {
     lt::add_torrent_params add_params;
-    this->init_add_params(add_params, torrent, download_path, name, resume_data);
-    this->session->async_add_torrent(add_params);
+    this->init_add_params(add_params, torrent_file, download_path, name, NULL);
+    lt::torrent_handle handle = this->session->add_torrent(add_params);
+    lt::torrent_status status = handle.status();
+    std::string info_hash = status.info_hash.to_string();
+    std::shared_ptr <TorrentState> state = std::make_shared<TorrentState>(-1, &status);
+    state->insert_db_row(this->db, this->config_id, torrent_file, download_path, name);
+    this->torrent_states[info_hash] = state;
+    return state;
+}
+
+void SessionWrapper::remove_torrent(std::string info_hash_str) {
+    logger.debug("Called remove for %s.", info_hash_str.c_str());
+    if (info_hash_str.size() != lt::sha1_hash::size * 2) {
+        throw std::runtime_error("Bad info_hash parameter.");
+    }
+    char buf[lt::sha1_hash::size];
+    if (!lt::from_hex(info_hash_str.c_str(), info_hash_str.size(), buf)) {
+        throw std::runtime_error("Error decoding hex str");
+    }
+    auto state_item = this->torrent_states.find(std::string(buf, lt::sha1_hash::size));
+    if (state_item == this->torrent_states.end()) {
+        throw std::runtime_error("Torrent not found.");
+    }
+    this->session->remove_torrent(state_item->second->handle, lt::session::delete_files);
 }
 
 void SessionWrapper::post_torrent_updates() {
@@ -207,6 +228,8 @@ BatchTorrentUpdate SessionWrapper::process_alerts() {
             this->on_alert_tracker_reply(&update, a);
         } else if (auto a = lt::alert_cast<lt::tracker_error_alert>(alert)) {
             this->on_alert_tracker_error(&update, a);
+        } else if (auto a = lt::alert_cast<lt::torrent_removed_alert>(alert)) {
+            this->on_alert_torrent_removed(&update, a);
         }
     }
 
@@ -224,7 +247,8 @@ std::shared_ptr <TorrentState> SessionWrapper::handle_torrent_added(lt::torrent_
     auto timer = this->timers.start_timer("handle_torrent_added");
     std::string info_hash = status->info_hash.to_string();
     if (this->torrent_states.find(info_hash) != this->torrent_states.end()) {
-        throw std::runtime_error("Torrent already added");
+        // Torrent already created when calling add_torrent
+        return std::shared_ptr<TorrentState>(NULL);
     }
 
     int64_t row_id;
@@ -233,9 +257,8 @@ std::shared_ptr <TorrentState> SessionWrapper::handle_torrent_added(lt::torrent_
         row_id = row_id_item->second;
         this->added_torrent_row_ids.erase(row_id_item);
     } else {
-        row_id = 123456789;
-        // TODO: create row
-        throw std::runtime_error("hi");
+        logger.error("Torrent didn't existing in torrent_states and no row_id was provided.");
+        return std::shared_ptr<TorrentState>(NULL);
     }
 
     std::shared_ptr <TorrentState> state = std::make_shared<TorrentState>(row_id, status);
@@ -268,8 +291,8 @@ void SessionWrapper::all_torrents_save_resume_data(bool flush_cache) {
 void SessionWrapper::on_alert_add_torrent(BatchTorrentUpdate *update, lt::add_torrent_alert *alert) {
     if (alert->error) {
         // TODO: Describe the actual error
-        logger.error("Error adding torrent!");
-        throw std::runtime_error("Libtorrent returned error adding torrent.");
+        logger.error("Libtorrent returned error adding torrent!");
+        return;
     }
     this->added_torrent_row_ids[alert->handle.info_hash().to_string()] = (int64_t) alert->params.userdata;
 }
@@ -281,6 +304,10 @@ void SessionWrapper::on_alert_state_update(BatchTorrentUpdate *update, lt::state
         auto state = this->torrent_states.find(info_hash);
         if (state == this->torrent_states.end()) {
             std::shared_ptr <TorrentState> state = this->handle_torrent_added(&status);
+            if (!state) {
+                logger.error("handle_torrent_added returned NULL pointer.");
+                continue;
+            }
             update->added.push_back(state);
             --this->num_waiting_initial_torrents;
         } else if (state->second->update_from_status(&status)) {
@@ -360,7 +387,8 @@ void SessionWrapper::on_alert_save_resume_data(BatchTorrentUpdate *update, lt::s
 
     auto state_item = this->torrent_states.find(info_hash);
     if (state_item == this->torrent_states.end()) {
-        throw std::runtime_error("Received fast resume data for a torrent not in torrent_states.");
+        logger.error("Received fast resume data for a torrent not in torrent_states.");
+        return;
     }
 
     std::string resume_data;
@@ -368,13 +396,10 @@ void SessionWrapper::on_alert_save_resume_data(BatchTorrentUpdate *update, lt::s
     SqliteStatement stmt = SqliteStatement(this->db, "UPDATE libtorrenttorrent SET resume_data = ?001 WHERE id = ?002");
     stmt.bind_blob(1, resume_data);
     stmt.bind_int64(2, state_item->second->row_id);
-    if (stmt.step()) {
-        throw std::runtime_error("Step returned row on UPDATE.");
-    }
-    int num_changes = sqlite3_changes(this->db);
+    int num_changes = stmt.update();
     if (num_changes != 1) {
         logger.error("Save resume data affected %d rows!", num_changes);
-        throw std::runtime_error("Save resume data affected != 1 row.");
+        return;
     }
 }
 
@@ -386,13 +411,10 @@ void SessionWrapper::on_alert_save_resume_data_failed(
         logger.debug("Received fast resume data failed for %s.", lt::to_hex(info_hash).c_str());
     }
     this->info_hashes_resume_data_wait.erase(info_hash);
-
     if (alert->error == lt::errors::resume_data_not_modified) {
         return;
     }
-
     logger.error("Received fast resume data failed for %s.", lt::to_hex(info_hash).c_str());
-    throw std::runtime_error("Received failed fast resume data.");
 }
 
 void SessionWrapper::on_alert_tracker_announce(BatchTorrentUpdate *update, lt::tracker_announce_alert *alert) {
@@ -426,4 +448,14 @@ void SessionWrapper::on_alert_tracker_error(BatchTorrentUpdate *update, lt::trac
     if (state_item != this->torrent_states.end() && state_item->second->update_tracker_error(alert)) {
         update->updated.push_back(state_item->second);
     }
+}
+
+void SessionWrapper::on_alert_torrent_removed(BatchTorrentUpdate *update, lt::torrent_removed_alert *alert) {
+    auto state_item = this->torrent_states.find(alert->info_hash.to_string());
+    if (state_item == this->torrent_states.end()) {
+        logger.error("Received torrent_removed_alert for torrent not in torrent_states.");
+        return;
+    }
+    state_item->second->delete_db_row(this->db);
+    this->torrent_states.erase(state_item);
 }

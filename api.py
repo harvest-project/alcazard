@@ -95,9 +95,9 @@ class AlcazarAPI:
             return JsonResponse({'detail': 'Realm does not exist. Create it by adding a client to it.'}, status=400)
 
         try:
-            torrent = await self.orchestrator.add_torrent(
+            data = await self.orchestrator.add_torrent(
                 realm=realm,
-                torrent=base64.b64decode(data['torrent']),
+                torrent_file=base64.b64decode(data['torrent']),
                 download_path=data['download_path'],
                 name=data.get('name'),
             )
@@ -105,7 +105,7 @@ class AlcazarAPI:
             return JsonResponse({'detail': str(exc)}, status=400)
         except TorrentAlreadyAddedException as exc:
             return JsonResponse({'detail': str(exc)}, status=409)
-        return JsonResponse(torrent.to_dict())
+        return JsonResponse(data)
 
     @jsonify_exceptions
     async def delete_torrent(self, request):
@@ -114,7 +114,7 @@ class AlcazarAPI:
             return JsonResponse({'detail': 'Realm does not exist. Create it by adding a client to it.'}, status=400)
 
         try:
-            await self.orchestrator.delete_torrent(
+            await self.orchestrator.remove_torrent(
                 realm=realm,
                 info_hash=request.match_info['info_hash'],
             )

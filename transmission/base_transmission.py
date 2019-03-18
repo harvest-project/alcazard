@@ -2,6 +2,8 @@ import asyncio
 import datetime
 import logging
 
+import transmissionrpc
+
 from alcazar_logging import BraceAdapter
 from clients import Manager, PeriodicTaskInfo, TorrentBatchUpdate
 from transmission import params
@@ -10,6 +12,10 @@ from transmission.torrent_state import TransmissionTorrentState
 from utils import timezone_now
 
 logger = BraceAdapter(logging.getLogger(__name__))
+
+# Original implmentation cannot parse 'recently-active', so we need to replace it.
+original_parse_torrent_ids = transmissionrpc.client.parse_torrent_ids
+transmissionrpc.client.parse_torrent_ids = lambda x: x if x == 'recently-active' else original_parse_torrent_ids(x)
 
 
 class BaseTransmission(Manager):
@@ -28,8 +34,6 @@ class BaseTransmission(Manager):
         self._last_full_update_seconds = None
         # How long the last quick update took
         self._last_quick_update_seconds = None
-        # Set of info hashes for quick update
-        self._quick_update_info_hashes = set()
 
         # An unpleasant hack: when deleting torrents, an update could already be ongoing and a response can arrive
         # later, that includes the now deleted torrent. In order to avoid re-adding and re-deleting the torrent
@@ -64,10 +68,10 @@ class BaseTransmission(Manager):
         self._peer_port = session_stats.peer_port
 
     async def __update_torrents(self, ids):
-        requested_info_hashes = set(ids) if ids is not None else set(self._torrent_states.keys())
-
         await self._executor.ensure_client(self._launch_deadline)
-        t_torrents = await self._executor.fetch_torrents(list(ids) if ids is not None else None)
+
+        # TODO: We're also getting recently removed, but transmissionrpc doesn't support it. Fork?
+        t_torrents = await self._executor.fetch_torrents(ids)
 
         batch = TorrentBatchUpdate()
 
@@ -81,9 +85,11 @@ class BaseTransmission(Manager):
 
             self._register_t_torrent_update(batch, t_torrent)
 
-        removed_info_hashes = requested_info_hashes - received_info_hashes
-        for removed_info_hash in removed_info_hashes:
-            self._register_t_torrent_delete(batch, removed_info_hash)
+        if not ids:
+            all_hashes = {state.info_hash for state in self._torrent_states.values()}
+            removed_info_hashes = all_hashes - received_info_hashes
+            for removed_info_hash in removed_info_hashes:
+                self._register_t_torrent_delete(batch, removed_info_hash)
 
         self._orchestrator.on_torrent_batch_update(self, batch)
 
@@ -104,16 +110,13 @@ class BaseTransmission(Manager):
         self._last_full_update_seconds = (timezone_now() - start).total_seconds()
 
     async def _quick_update(self):
-        logger.debug('Quick update hashes: {}', self._quick_update_info_hashes)
-        if not self._quick_update_info_hashes:
-            return
-
         logger.debug('Starting quick update for {}', self._name)
         start = timezone_now()
-
-        await self.__update_torrents(self._quick_update_info_hashes)
-
-        self._last_quick_update_seconds = (timezone_now() - start).total_seconds()
+        received_info_hashes = await self.__update_torrents('recently-active')
+        time_taken = (timezone_now() - start).total_seconds()
+        logger.debug('Completed quick update for {} with {} torrents in {}.'.format(
+            self._name, len(received_info_hashes), time_taken))
+        self._last_quick_update_seconds = time_taken
 
     def get_info_dict(self):
         data = super().get_info_dict()
@@ -124,7 +127,6 @@ class BaseTransmission(Manager):
     def get_debug_dict(self):
         data = super().get_debug_dict()
         data.update({
-            'torrents_in_quick_update': len(self._quick_update_info_hashes),
             'last_full_update_seconds': self._last_full_update_seconds,
             'last_quick_update_seconds': self._last_quick_update_seconds,
         })
@@ -140,44 +142,30 @@ class BaseTransmission(Manager):
             self._torrent_states[torrent_state.info_hash] = torrent_state
             batch.added[torrent_state.info_hash] = torrent_state.to_dict()
 
-        if torrent_state.should_quick_update:
-            torrent_state.last_quick_update = timezone_now()
-            logger.debug('Add torrent {} for quick updating.', torrent_state.info_hash)
-            self._quick_update_info_hashes.add(torrent_state.info_hash)
-        elif torrent_state.info_hash in self._quick_update_info_hashes:
-            secs_since_last = (timezone_now() - torrent_state.last_quick_update).total_seconds()
-            if secs_since_last > params.QUICK_UPDATE_TIMEOUT:
-                logger.debug('Remove torrent {} from quick updating.', torrent_state.info_hash)
-                self._quick_update_info_hashes.remove(torrent_state.info_hash)
-
         return torrent_state
 
     def _register_t_torrent_delete(self, batch, info_hash):
         if info_hash in self._torrent_states:
             del self._torrent_states[info_hash]
-            self._quick_update_info_hashes.discard(info_hash)
             batch.removed.add(info_hash)
 
-    async def add_torrent(self, torrent, download_path, name):
+    async def add_torrent(self, torrent_file, download_path, name):
         if not self._initialized:
             message = 'Unable to add torrent in {}: not fully started up yet.'.format(self._name)
             logger.error(message)
             raise Exception(message)
 
         logger.info('Adding torrent in {}', self._name)
-        t_torrent = await self._executor.add_torrent(torrent, download_path, name)
+        t_torrent = await self._executor.add_torrent(torrent_file, download_path, name)
         info_hash = t_torrent.hashString
-
         self._deleted_info_hashes.discard(info_hash)
-        logger.debug('Adding new torrent {} for quick update.', info_hash)
-        self._quick_update_info_hashes.add(info_hash)
 
         batch = TorrentBatchUpdate()
         torrent_data = self._register_t_torrent_update(batch, t_torrent)
         self._orchestrator.on_torrent_batch_update(self, batch)
-        return torrent_data
+        return torrent_data.to_dict()
 
-    async def delete_torrent(self, info_hash):
+    async def remove_torrent(self, info_hash):
         if not self._initialized:
             message = 'Unable to delete torrent {} from {}: not fully started up yet.'.format(
                 info_hash, self._name)
@@ -186,7 +174,7 @@ class BaseTransmission(Manager):
 
         logger.info('Deleting torrent {} from {}', info_hash, self._name)
         torrent_state = self._torrent_states[info_hash]
-        await self._executor.delete_torrent(torrent_state.transmission_id)
+        await self._executor.remove_torrent(torrent_state.transmission_id)
         self._deleted_info_hashes.add(info_hash)
 
         batch = TorrentBatchUpdate()

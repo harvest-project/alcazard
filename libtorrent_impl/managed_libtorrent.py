@@ -7,7 +7,7 @@ from collections import Counter
 from concurrent.futures.thread import ThreadPoolExecutor
 
 from alcazar_logging import BraceAdapter
-from clients import Manager, PeriodicTaskInfo, TorrentAlreadyAddedException
+from clients import Manager, PeriodicTaskInfo, TorrentBatchUpdate
 from error_manager import Severity
 from libtorrent_impl import params
 from libtorrent_impl.speedups import session
@@ -184,37 +184,21 @@ class ManagedLibtorrent(Manager):
         })
         return data
 
-    async def _add_torrent(self, torrent, download_path, name, *, async_add, resume_data):
-        if async_add:
-            await self._exec(
-                self._session.async_add_torrent,
-                torrent,
-                download_path,
-                name,
-                resume_data,
-            )
-        else:
-            add_params = params.get_torrent_add_params(torrent, download_path, name, resume_data)
-            handle = await self._exec(self._session.add_torrent)
-            status = handle.status()
-            if str(status.info_hash) in self._torrent_states:
-                raise TorrentAlreadyAddedException()
-            torrent_state = self.__torrent_handle_added(
-                status=status,
-                torrent_file=torrent,
-                download_path=download_path,
-            )
-            return torrent_state
-
-    async def add_torrent(self, torrent, download_path, name):
+    async def add_torrent(self, torrent_file, download_path, name):
         logger.debug('Adding torrent to {}', download_path)
-        return await self._add_torrent(
-            torrent=torrent,
-            download_path=download_path,
-            name=name,
-            async_add=False,
-            resume_data=None,
+        data = await self._exec(
+            self._session.add_torrent,
+            torrent_file,
+            download_path,
+            name,
         )
+        batch = TorrentBatchUpdate()
+        batch.added[data['info_hash']] = data
+        self._orchestrator.on_torrent_batch_update(self, batch)
+        return data
 
-    async def delete_torrent(self, info_hash):
+    async def remove_torrent(self, info_hash):
         await self._exec(self._session.remove_torrent, info_hash)
+        batch = TorrentBatchUpdate()
+        batch.removed.add(info_hash)
+        self._orchestrator.on_torrent_batch_update(self, batch)

@@ -27,6 +27,26 @@ void SqliteStatement::reset() {
     SQLITE_CHECK(sqlite3_reset(this->ptr));
 }
 
+int SqliteStatement::update() {
+    if (this->step()) {
+        throw std::runtime_error("Step returned row on UPDATE.");
+    }
+    return sqlite3_changes(this->db);
+}
+
+int64_t SqliteStatement::insert() {
+    if (this->step()) {
+        throw std::runtime_error("Step returned row on INSERT.");
+    }
+    return sqlite3_last_insert_rowid(this->db);
+}
+
+void SqliteStatement::exec_delete() {
+    if (this->step()) {
+        throw std::runtime_error("Step returned row on DELETE.");
+    }
+}
+
 void SqliteStatement::clear_bindings() {
     SQLITE_CHECK(sqlite3_clear_bindings(this->ptr));
 }
@@ -40,11 +60,11 @@ void SqliteStatement::bind_int64(int col, int64_t value) {
 }
 
 void SqliteStatement::bind_text(int col, std::string value) {
-    SQLITE_CHECK(sqlite3_bind_text64(this->ptr, col, value.c_str(), value.size(), NULL, SQLITE_UTF8));
+    SQLITE_CHECK(sqlite3_bind_text64(this->ptr, col, value.c_str(), value.size(), SQLITE_TRANSIENT, SQLITE_UTF8));
 }
 
 void SqliteStatement::bind_blob(int col, std::string value) {
-    SQLITE_CHECK(sqlite3_bind_blob64(this->ptr, col, value.c_str(), value.size(), NULL));
+    SQLITE_CHECK(sqlite3_bind_blob64(this->ptr, col, value.c_str(), value.size(), SQLITE_TRANSIENT));
 }
 
 bool SqliteStatement::get_is_null(int col) {

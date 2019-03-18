@@ -17,6 +17,9 @@ public:
 
     bool step();
     void reset();
+    int update();
+    int64_t insert();
+    void exec_delete();
 
     void clear_bindings();
     void bind_int(int col, int value);

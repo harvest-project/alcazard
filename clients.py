@@ -191,6 +191,10 @@ class Manager(ABC):
         self._launch_datetime = None
 
     @property
+    def initialized(self):
+        return self._initialized
+
+    @property
     def name(self):
         return self._name
 
@@ -246,7 +250,7 @@ class Manager(ABC):
         pass
 
     @abstractmethod
-    async def delete_torrent(self, info_hash):
+    async def remove_torrent(self, info_hash):
         pass
 
     async def _run_periodic_task_if_needed(self, current_time, task):
@@ -299,7 +303,6 @@ def get_manager_types():
         from libtorrent_impl.managed_libtorrent import ManagedLibtorrent
         managers.append(ManagedLibtorrent)
     except (ImportError, ModuleNotFoundError) as exc:
-        raise
         logger.warning('Unable import managed_libtorrent: {}.', exc)
 
     return {manager_type.key: manager_type for manager_type in managers}

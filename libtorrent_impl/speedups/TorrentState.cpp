@@ -1,10 +1,15 @@
 #include <string>
 
 #include <libtorrent/torrent_status.hpp>
+#include <sqlite3.h>
 
+#include "yuarel.hpp"
+#include "SqliteHelper.hpp"
 #include "TorrentState.hpp"
 
 namespace lt = libtorrent;
+
+Logger TorrentState::logger("TorrentState");
 
 #define UPDATE_STATE(A, B) { auto __temp = B; if (A != __temp) { A = __temp; updated = true; } }
 
@@ -15,6 +20,38 @@ TorrentState::TorrentState(int64_t row_id, lt::torrent_status *status)
     this->download_path = status->save_path;
     this->size = status->total_wanted;
     this->update_from_status(status);
+}
+
+void TorrentState::insert_db_row(sqlite3 *db, int64_t config_id, std::string torrent_file, std::string download_path,
+                                 std::string *name_ptr) {
+    SqliteStatement stmt = SqliteStatement(
+            db,
+            "INSERT INTO libtorrenttorrent (libtorrent_id, info_hash, torrent_file, download_path, name)"
+            " VALUES (?001, ?002, ?003, ?004, ?005)");
+
+    std::string name;
+    std::string info_hash_str = lt::to_hex(this->info_hash);
+
+    stmt.bind_int64(1, config_id);
+    stmt.bind_blob(2, info_hash_str.c_str());
+    stmt.bind_blob(3, torrent_file);
+    stmt.bind_text(4, download_path);
+    if (name_ptr) {
+        name = *name_ptr;
+        stmt.bind_text(5, name.c_str());
+    }
+    this->row_id = stmt.insert();
+}
+
+void TorrentState::delete_db_row(sqlite3 *db) {
+    if (this->row_id == -1) {
+        TorrentState::logger.error("Trying to delete_db_row for TorrentState with id -1.");
+        return;
+    }
+    SqliteStatement stmt = SqliteStatement(db, "DELETE FROM libtorrenttorrent WHERE id = ?001");
+    stmt.bind_int64(1, this->row_id);
+    stmt.exec_delete();
+    this->row_id = -1;
 }
 
 bool TorrentState::update_from_status(lt::torrent_status *status) {
@@ -46,9 +83,45 @@ bool TorrentState::update_tracker_reply() {
 }
 
 bool TorrentState::update_tracker_error(lt::tracker_error_alert *alert) {
+    std::string host = extract_host_from_url(std::string(alert->tracker_url()));
+    char buffer[400];
 
+    snprintf(
+            buffer,
+            sizeof(buffer) / sizeof(buffer[0]),
+            "%s (%s)",
+            lt::convert_from_native(alert->error.message()).c_str(),
+            host.c_str()
+    );
 
     bool updated = false;
     UPDATE_STATE(this->tracker_status, TRACKER_STATUS_ERROR);
+    UPDATE_STATE(this->tracker_error, std::string(buffer));
     return updated;
+}
+
+std::unordered_map <std::string, std::string> host_from_url_cache;
+
+std::string extract_host_from_url(std::string url) {
+    auto cache_item = host_from_url_cache.find(url);
+    if (cache_item != host_from_url_cache.end()) {
+        return cache_item->second;
+    }
+
+    char buffer[url.size() + 1];
+    url.copy(buffer, url.size());
+    buffer[url.size()] = 0;
+
+    yuarel y_url;
+    std::string result;
+    if (yuarel_parse(&y_url, buffer) == -1) {
+        result = url;
+    }
+    if (y_url.host) {
+        result = std::string(y_url.host);
+    } else {
+        result = url;
+    }
+
+    return host_from_url_cache[url] = result;
 }

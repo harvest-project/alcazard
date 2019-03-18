@@ -57,9 +57,9 @@ class TransmissionAsyncExecutor:
     async def fetch_torrents(self, ids):
         return await asyncio.wrap_future(self._thread_pool.submit(self._fetch_torrents, ids))
 
-    def _add_torrent(self, torrent, download_path, name):
+    def _add_torrent(self, torrent_file, download_path, name):
         logger.debug('Adding torrent to {}:{}', self._host, self._port)
-        base64_torrent = base64.b64encode(torrent).decode()
+        base64_torrent = base64.b64encode(torrent_file).decode()
         if name is not None:
             # Need to rename the torrent as specified in the request
             bootstrap_t_torrent = self._client.add_torrent(
@@ -87,12 +87,12 @@ class TransmissionAsyncExecutor:
         return await asyncio.wrap_future(self._thread_pool.submit(
             self._add_torrent, torrent, download_path, name))
 
-    def _delete_torrent(self, t_id):
+    def _remove_torrent(self, t_id):
         logger.debug('Deleting torrent {} from {}:{}', t_id, self._host, self._port)
         self._client.remove_torrent(t_id, delete_data=True)
 
-    async def delete_torrent(self, t_id):
-        return await asyncio.wrap_future(self._thread_pool.submit(self._delete_torrent, t_id))
+    async def remove_torrent(self, t_id):
+        return await asyncio.wrap_future(self._thread_pool.submit(self._remove_torrent, t_id))
 
     def _get_session_stats(self):
         logger.debug('Get session stats')

@@ -28,6 +28,8 @@ enum TrackerStatus {
 };
 
 class TorrentState {
+    static Logger logger;
+
 public:
     lt::torrent_handle handle;
 
@@ -48,6 +50,9 @@ public:
     std::string tracker_error;
 
     TorrentState(int64_t row_id, lt::torrent_status *status);
+    void insert_db_row(sqlite3 *db, int64_t config_id, std::string torrent_file, std::string download_path,
+                       std::string *name_ptr);
+    void delete_db_row(sqlite3 *db);
     bool update_from_status(lt::torrent_status *status);
     bool update_tracker_announce();
     bool update_tracker_reply();
@@ -87,5 +92,8 @@ inline Status get_alcazar_status(lt::torrent_status::state_t state) {
             throw std::runtime_error("Unknown torrent_status.state");
     }
 }
+
+extern std::unordered_map <std::string, std::string> host_from_url_cache;
+std::string extract_host_from_url(std::string url);
 
 #endif
