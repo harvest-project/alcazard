@@ -45,8 +45,8 @@ void SessionWrapper::init_settings_pack(lt::settings_pack *pack) {
     pack->set_str(lt::settings_pack::user_agent, "Deluge/1.2.15");
     pack->set_str(lt::settings_pack::peer_fingerprint, "-DE13F0-");
     pack->set_str(lt::settings_pack::dht_bootstrap_nodes,
-                 "router.bittorrent.com:6881,router.utorrent.com:6881,router.bitcomet.com:6881,dht.transmissionbt.com:6881,"
-                 "dht.aelitis.com:6881");
+                  "router.bittorrent.com:6881,router.utorrent.com:6881,router.bitcomet.com:6881,dht.transmissionbt.com:6881,"
+                  "dht.aelitis.com:6881");
     pack->set_int(lt::settings_pack::alert_queue_size, 4 * 1000 * 1000);
     pack->set_int(lt::settings_pack::cache_size, 4096);
     pack->set_int(lt::settings_pack::tick_interval, 1000);
@@ -111,7 +111,7 @@ int SessionWrapper::load_initial_torrents() {
         SqliteStatement count_stmt = SqliteStatement(this->db, "SELECT COUNT(*) FROM torrent");
         count_stmt.step();
         this->num_loaded_initial_torrents = 0;
-        this->num_initial_torrents = (int)count_stmt.get_int64(0);
+        this->num_initial_torrents = (int) count_stmt.get_int64(0);
     }
 
     SqliteStatement fetch_stmt = SqliteStatement(
@@ -177,6 +177,7 @@ std::shared_ptr <TorrentState> SessionWrapper::add_torrent(
     lt::torrent_status status = handle.status();
     std::string info_hash = status.info_hash.to_string();
     std::shared_ptr <TorrentState> state = std::make_shared<TorrentState>(-1, &status);
+    this->apply_pre_load_tracker_state(state);
     state->insert_db_row(this->db, torrent_file, download_path, name);
     this->torrent_states[info_hash] = state;
     return state;
@@ -244,6 +245,7 @@ BatchTorrentUpdate SessionWrapper::process_alerts(bool shutting_down) {
     }
 
     update.num_waiting_for_resume_data = this->info_hashes_resume_data_wait.size();
+    update.succeeded_listening = this->succeeded_listening;
 
     return update;
 }
@@ -267,6 +269,7 @@ std::shared_ptr <TorrentState> SessionWrapper::handle_torrent_added(lt::torrent_
     }
 
     std::shared_ptr <TorrentState> state = std::make_shared<TorrentState>(row_id, status);
+    this->apply_pre_load_tracker_state(state);
     this->torrent_states[info_hash] = state;
     return state;
 }
@@ -318,6 +321,18 @@ void SessionWrapper::on_alert_state_update(BatchTorrentUpdate *update, lt::state
         } else if (state->second->update_from_status(&status)) {
             update->updated.push_back(state->second);
         }
+    }
+}
+
+void SessionWrapper::apply_pre_load_tracker_state(std::shared_ptr <TorrentState> state) {
+    auto tracker_state = this->pre_load_tracker_states.find(state->info_hash);
+    if (tracker_state != this->pre_load_tracker_states.end()) {
+        if (logger.is_enabled_for(Logger::DEBUG)) {
+            logger.debug("Found pre_load_tracker state for %s.", lt::to_hex(state->info_hash).c_str());
+        }
+        state->tracker_status = tracker_state->second.tracker_status;
+        state->tracker_error = tracker_state->second.tracker_error;
+        this->pre_load_tracker_states.erase(tracker_state);
     }
 }
 
@@ -433,6 +448,13 @@ void SessionWrapper::on_alert_tracker_announce(BatchTorrentUpdate *update, lt::t
     auto state_item = this->torrent_states.find(info_hash);
     if (state_item != this->torrent_states.end() && state_item->second->update_tracker_announce()) {
         update->updated.push_back(state_item->second);
+    } else {
+        auto existing_state_item = this->pre_load_tracker_states.find(info_hash);
+        std::string tracker_error;
+        if (existing_state_item != this->pre_load_tracker_states.end()) {
+            tracker_error = existing_state_item->second.tracker_error;
+        }
+        this->pre_load_tracker_states[info_hash] = TrackerTorrentState{TRACKER_STATUS_ANNOUNCING, tracker_error};
     }
 }
 
@@ -444,6 +466,8 @@ void SessionWrapper::on_alert_tracker_reply(BatchTorrentUpdate *update, lt::trac
     auto state_item = this->torrent_states.find(info_hash);
     if (state_item != this->torrent_states.end() && state_item->second->update_tracker_reply()) {
         update->updated.push_back(state_item->second);
+    } else {
+        this->pre_load_tracker_states[info_hash] = TrackerTorrentState{TRACKER_STATUS_SUCCESS, ""};
     }
 }
 
@@ -455,6 +479,9 @@ void SessionWrapper::on_alert_tracker_error(BatchTorrentUpdate *update, lt::trac
     auto state_item = this->torrent_states.find(info_hash);
     if (state_item != this->torrent_states.end() && state_item->second->update_tracker_error(alert)) {
         update->updated.push_back(state_item->second);
+    } else {
+        TrackerTorrentState tracker_torrent_state{TRACKER_STATUS_ERROR, format_tracker_error(alert)};
+        this->pre_load_tracker_states[info_hash] = tracker_torrent_state;
     }
 }
 
@@ -466,4 +493,13 @@ void SessionWrapper::on_alert_torrent_removed(BatchTorrentUpdate *update, lt::to
     }
     state_item->second->delete_db_row(this->db);
     this->torrent_states.erase(state_item);
+}
+
+void SessionWrapper::on_alert_listen_succeeded(BatchTorrentUpdate *update, lt::listen_succeeded_alert *alert) {
+    logger.info(alert->message().c_str());
+    this->succeeded_listening = true;
+}
+
+void SessionWrapper::on_alert_listen_failed(BatchTorrentUpdate *update, lt::listen_failed_alert *alert) {
+    logger.warning(alert->message().c_str());
 }

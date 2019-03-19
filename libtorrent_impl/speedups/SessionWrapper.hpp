@@ -27,7 +27,9 @@ private:
     std::vector <std::pair<std::string, int>> metrics_names;
     std::unordered_map <std::string, int64_t> added_torrent_row_ids;
     std::unordered_set <std::string> info_hashes_resume_data_wait;
+    std::unordered_map <std::string, TrackerTorrentState> pre_load_tracker_states;
     std::unordered_set <int64_t> loaded_torrent_ids;
+    bool succeeded_listening = false;
 
     void init_settings_pack(lt::settings_pack *pack);
     void init_metrics_names();
@@ -35,6 +37,7 @@ private:
                          std::string *name, std::string *resume_data);
     std::shared_ptr <TorrentState> handle_torrent_added(lt::torrent_status *status);
     void calculate_torrent_count_metrics(BatchTorrentUpdate *update);
+    void apply_pre_load_tracker_state(std::shared_ptr <TorrentState> state);
     void on_alert_add_torrent(BatchTorrentUpdate *update, lt::add_torrent_alert *alert);
     void on_alert_state_update(BatchTorrentUpdate *update, lt::state_update_alert *alert);
     void on_alert_session_stats(BatchTorrentUpdate *update, lt::session_stats_alert *alert);
@@ -45,6 +48,8 @@ private:
     void on_alert_tracker_reply(BatchTorrentUpdate *update, lt::tracker_reply_alert *alert);
     void on_alert_tracker_error(BatchTorrentUpdate *update, lt::tracker_error_alert *alert);
     void on_alert_torrent_removed(BatchTorrentUpdate *update, lt::torrent_removed_alert *alert);
+    void on_alert_listen_succeeded(BatchTorrentUpdate *update, lt::listen_succeeded_alert *alert);
+    void on_alert_listen_failed(BatchTorrentUpdate *update, lt::listen_failed_alert *alert);
 
     inline void dispatch_alert(BatchTorrentUpdate *update, lt::alert *alert) {
         if (auto a = lt::alert_cast<lt::add_torrent_alert>(alert)) {
@@ -67,6 +72,10 @@ private:
             this->on_alert_tracker_error(update, a);
         } else if (auto a = lt::alert_cast<lt::torrent_removed_alert>(alert)) {
             this->on_alert_torrent_removed(update, a);
+        } else if (auto a = lt::alert_cast<lt::listen_succeeded_alert>(alert)) {
+            this->on_alert_listen_succeeded(update, a);
+        } else if (auto a = lt::alert_cast<lt::listen_failed_alert>(alert)) {
+            this->on_alert_listen_failed(update, a);
         }
     }
 

@@ -27,6 +27,11 @@ enum TrackerStatus {
     TRACKER_STATUS_MAX
 };
 
+struct TrackerTorrentState {
+    TrackerStatus tracker_status;
+    std::string tracker_error;
+};
+
 class TorrentState {
     static Logger logger;
 
@@ -67,6 +72,7 @@ public:
     std::unordered_map <std::string, uint64_t> metrics;
     std::unordered_map <std::string, TimerStat> timer_stats;
     int num_waiting_for_resume_data;
+    bool succeeded_listening;
 
     std::vector <lt::save_resume_data_alert*> save_resume_data_alerts;
 };
@@ -96,5 +102,6 @@ inline Status get_alcazar_status(lt::torrent_status::state_t state) {
 
 extern std::unordered_map <std::string, std::string> host_from_url_cache;
 std::string extract_host_from_url(std::string url);
+std::string format_tracker_error(lt::tracker_error_alert *alert);
 
 #endif

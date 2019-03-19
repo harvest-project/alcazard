@@ -19,7 +19,6 @@ from libtorrent_impl.utils import LibtorrentClientException
 
 logger = BraceAdapter(logging.getLogger(__name__))
 
-
 class ManagedLibtorrent(Manager):
     key = 'managed_libtorrent'
     config_model = models.ManagedLibtorrentConfig
@@ -161,7 +160,8 @@ class ManagedLibtorrent(Manager):
             await self._process_alerts(shutting_down=True)
             await asyncio.sleep(params.LOOP_INTERVAL)
             if time.time() - wait_start > params.SHUTDOWN_TIMEOUT:
-                raise LibtorrentClientException('Shutdown timeout reached.')
+                raise LibtorrentClientException('Shutdown timeout reached with {} remaining.'.format(
+                    self._num_waiting_for_resume_data))
         logger.info('Saving data completed in {}, deallocating session.', time.time() - start)
 
         # This will dealloc the session object, which takes time

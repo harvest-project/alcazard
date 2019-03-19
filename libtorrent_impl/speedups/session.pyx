@@ -10,6 +10,7 @@ from libcpp.utility cimport pair
 from libcpp.memory cimport shared_ptr
 from libcpp.unordered_map cimport unordered_map
 
+from error_manager import Severity
 from libtorrent_impl import params
 from models import ManagedLibtorrentConfig
 from utils import timezone_now
@@ -46,7 +47,7 @@ cdef extern from "SessionWrapper.hpp":
         string tracker_error;
 
     ctypedef struct TimerStat:
-        int count
+        int64_t count
         double total_seconds
 
     cdef cppclass BatchTorrentUpdate:
@@ -58,6 +59,7 @@ cdef extern from "SessionWrapper.hpp":
         unordered_map[string, TimerStat] timer_stats;
 
         int num_waiting_for_resume_data
+        cbool succeeded_listening
 
     cdef cppclass SessionWrapper:
         unordered_map[string, shared_ptr[TorrentState]] torrent_states
@@ -78,10 +80,10 @@ cdef extern from "SessionWrapper.hpp":
         void post_session_stats() nogil except +
         void all_torrents_save_resume_data(cbool flush_cache) nogil except +
 
-cdef calc_dict_rate(old_dict, new_dict, key):
+cdef int64_t calc_dict_rate(old_dict, new_dict, key):
     if not old_dict:
         return 0
-    return int((new_dict[key] - old_dict[key]) / params.UPDATE_SESSION_STATS_INTERVAL)
+    return <int64_t>((new_dict[key] - old_dict[key]) / params.UPDATE_SESSION_STATS_INTERVAL)
 
 cdef class LibtorrentSession:
     cdef:
@@ -152,8 +154,8 @@ cdef class LibtorrentSession:
 
     cdef void _update_manager_session_stats(self, dict prev_metrics, dict new_metrics) except *:
         cdef:
-            int payload_download = new_metrics['net.recv_payload_bytes[counter]']
-            int payload_upload = new_metrics['net.sent_payload_bytes[counter]']
+            int64_t payload_download = new_metrics['net.recv_payload_bytes[counter]']
+            int64_t payload_upload = new_metrics['net.sent_payload_bytes[counter]']
 
         self.manager._session_stats = SessionStats(
             torrent_count=new_metrics['ses.num_loaded_torrents[gauge]'],
@@ -184,6 +186,16 @@ cdef class LibtorrentSession:
             dict metrics_dict = {}
 
         self.manager._num_waiting_for_resume_data = update.num_waiting_for_resume_data
+
+        if update.succeeded_listening:
+            self.manager._error_manager.clear_error('port_listen', convert_errors_to_warnings=False)
+        else:
+            is_error = (timezone_now() - self.manager._launch_datetime).total_seconds() > 60
+            self.manager._error_manager.add_error(
+                Severity.ERROR if is_error else Severity.WARNING,
+                'port_listen',
+                'Failed binding to peer port',
+            )
 
         if update.timer_stats.size():
             for timer_stat in update.timer_stats:
@@ -268,7 +280,7 @@ cdef class LibtorrentSession:
         pass
 
     def load_initial_torrents(self):
-        cdef int result
+        cdef int64_t result
         with nogil:
             result = self.wrapper.load_initial_torrents()
         return result

@@ -80,20 +80,9 @@ bool TorrentState::update_tracker_reply() {
 }
 
 bool TorrentState::update_tracker_error(lt::tracker_error_alert *alert) {
-    std::string host = extract_host_from_url(std::string(alert->tracker_url()));
-    char buffer[400];
-
-    snprintf(
-            buffer,
-            sizeof(buffer) / sizeof(buffer[0]),
-            "%s (%s)",
-            alert->error.message().c_str(),
-            host.c_str()
-    );
-
     bool updated = false;
     UPDATE_STATE(this->tracker_status, TRACKER_STATUS_ERROR);
-    UPDATE_STATE(this->tracker_error, std::string(buffer));
+    UPDATE_STATE(this->tracker_error, format_tracker_error(alert));
     return updated;
 }
 
@@ -121,4 +110,27 @@ std::string extract_host_from_url(std::string url) {
     }
 
     return host_from_url_cache[url] = result;
+}
+
+std::string format_tracker_error(lt::tracker_error_alert *alert) {
+
+    std::string host = extract_host_from_url(std::string(alert->tracker_url()));
+    std::string errormessage = alert->error.message();
+    // Ugliest UTF-8 safe first letter uppercase code
+    if (errormessage[0] >= 32 && errormessage[0] < 128) {
+        errormessage[0] = std::toupper(errormessage[0]);
+    }
+
+    char buffer[400];
+
+    snprintf(
+            buffer,
+            sizeof(buffer) / sizeof(buffer[0]),
+            "%s - %s (%s)",
+            errormessage.c_str(),
+            alert->error_message(),
+            host.c_str()
+    );
+
+    return std::string(buffer);
 }
