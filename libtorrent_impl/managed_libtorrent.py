@@ -19,6 +19,7 @@ from libtorrent_impl.utils import LibtorrentClientException
 
 logger = BraceAdapter(logging.getLogger(__name__))
 
+
 class ManagedLibtorrent(Manager):
     key = 'managed_libtorrent'
     config_model = models.ManagedLibtorrentConfig
@@ -69,6 +70,7 @@ class ManagedLibtorrent(Manager):
         super().launch()
 
         logger.debug('Initializing DB for libtorrent at {}.'.format(self._state_path))
+        os.makedirs(os.path.dirname(self._state_path), exist_ok=True)
         db = peewee.SqliteDatabase(self._state_path)
         lt_models.LT_DB.initialize(db)
         with db:
