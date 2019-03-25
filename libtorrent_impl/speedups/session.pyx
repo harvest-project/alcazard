@@ -53,7 +53,7 @@ cdef extern from "SessionWrapper.hpp":
     cdef cppclass BatchTorrentUpdate:
         vector[shared_ptr[TorrentState]] added
         vector[shared_ptr[TorrentState]] updated
-        vector[string] removed
+        vector[shared_ptr[TorrentState]] removed
 
         unordered_map[string, uint64_t] metrics;
         unordered_map[string, TimerStat] timer_stats;
@@ -83,12 +83,13 @@ cdef extern from "SessionWrapper.hpp":
 cdef int64_t calc_dict_rate(old_dict, new_dict, key):
     if not old_dict:
         return 0
-    return <int64_t>((new_dict[key] - old_dict[key]) / params.UPDATE_SESSION_STATS_INTERVAL)
+    return <int64_t> ((new_dict[key] - old_dict[key]) / params.UPDATE_SESSION_STATS_INTERVAL)
 
 cdef class LibtorrentSession:
     cdef:
         orchestrator
         manager
+        config
         instance_config
         start_total_downloaded
         start_total_uploaded
@@ -100,10 +101,11 @@ cdef class LibtorrentSession:
             string c_db_path = db_path.encode()
             string c_listen_interfaces = listen_interfaces.encode()
 
-        set_level(<Level><int>logging.getLogger('').level)
+        set_level(<Level> <int> logging.getLogger('').level)
 
         self.orchestrator = manager._orchestrator
         self.manager = manager
+        self.config = manager.config
         self.instance_config = manager.instance_config
         self.name = manager.name
 
@@ -199,7 +201,7 @@ cdef class LibtorrentSession:
 
         if update.timer_stats.size():
             for timer_stat in update.timer_stats:
-                timer_stats_dict[timer_stat.first.decode()] = <dict>timer_stat.second
+                timer_stats_dict[timer_stat.first.decode()] = <dict> timer_stat.second
             self.manager._timer_stats = timer_stats_dict
 
         if update.metrics.size():
@@ -240,8 +242,13 @@ cdef class LibtorrentSession:
         for state in update.updated:
             state_dict = self.torrent_state_to_dict(state)
             updated[state_dict['info_hash']] = state_dict
-        for info_hash in update.removed:
-            removed.add(info_hash)
+        for state in update.removed:
+            if self.config.clean_directories_on_remove:
+                self.manager.clean_torrent_directories(
+                    deref(state).download_path.decode(),
+                    deref(state).name.decode(),
+                )
+            removed.add(to_hex(deref(state).info_hash).decode())
 
         logger.debug('Firing batch')
         self.orchestrator.on_torrent_batch_update(self.manager, TorrentBatchUpdate(added, updated, removed))

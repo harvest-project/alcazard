@@ -492,6 +492,7 @@ void SessionWrapper::on_alert_torrent_removed(BatchTorrentUpdate *update, lt::to
         return;
     }
     state_item->second->delete_db_row(this->db);
+    update->removed.push_back(state_item->second);
     this->torrent_states.erase(state_item);
 }
 

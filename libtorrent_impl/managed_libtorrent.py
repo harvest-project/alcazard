@@ -210,6 +210,3 @@ class ManagedLibtorrent(Manager):
 
     async def remove_torrent(self, info_hash):
         await self._exec(self._session.remove_torrent, info_hash)
-        batch = TorrentBatchUpdate()
-        batch.removed.add(info_hash)
-        self._orchestrator.on_torrent_batch_update(self, batch)

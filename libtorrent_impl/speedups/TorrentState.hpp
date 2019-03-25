@@ -65,16 +65,16 @@ public:
 
 class BatchTorrentUpdate {
 public:
-    std::vector <std::shared_ptr<TorrentState >> added;
+    std::vector <std::shared_ptr<TorrentState>> added;
     std::vector <std::shared_ptr<TorrentState>> updated;
-    std::vector <std::string> removed;
+    std::vector <std::shared_ptr<TorrentState>> removed;
 
     std::unordered_map <std::string, uint64_t> metrics;
     std::unordered_map <std::string, TimerStat> timer_stats;
     int num_waiting_for_resume_data;
     bool succeeded_listening;
 
-    std::vector <lt::save_resume_data_alert*> save_resume_data_alerts;
+    std::vector<lt::save_resume_data_alert *> save_resume_data_alerts;
 };
 
 inline Status get_alcazar_status(lt::torrent_status::state_t state) {

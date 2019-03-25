@@ -175,6 +175,7 @@ class BaseTransmission(Manager):
         logger.info('Deleting torrent {} from {}', info_hash, self._name)
         torrent_state = self._torrent_states[info_hash]
         await self._executor.remove_torrent(torrent_state.transmission_id)
+        self.clean_torrent_directories(torrent_state.download_path, torrent_state.name)
         self._deleted_info_hashes.add(info_hash)
 
         batch = TorrentBatchUpdate()

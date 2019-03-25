@@ -1,4 +1,6 @@
 import logging
+import os
+import shutil
 import time
 import traceback
 from abc import ABC, abstractmethod
@@ -279,6 +281,35 @@ class Manager(ABC):
                     traceback=traceback.format_exc()
                 )
                 logger.exception(message)
+
+    def _can_clean_directory(self, directory):
+        items = os.listdir(directory)
+        if self._config.clean_torrent_file_on_remove:
+            return all(f.lower().endswith('.torrent') or f == 'ReleaseInfo2.txt' for f in items)
+        else:
+            return len(items) == 0
+
+    def clean_torrent_directories(self, download_path, torrent_name):
+        try:
+            if not self._config.clean_directories_on_remove:
+                logger.debug('Directory clean on remove is disabled in config.')
+                return
+            start_dir = os.path.join(download_path, torrent_name)
+            if not os.path.isdir(start_dir):
+                start_dir = download_path
+                if not os.path.isdir(start_dir):
+                    logger.debug('Directory for {}/{} not found.'.format(download_path, torrent_name))
+                    return
+            while self._can_clean_directory(start_dir):
+                logger.info('Removing cleanable directory {}.'.format(start_dir))
+                shutil.rmtree(start_dir)
+        except Exception as exc:
+            self._error_manager.add_error(
+                Severity.ERROR,
+                'clean_torrent_directories',
+                'Unable to clean torrent directories for {}/{}.'.format(download_path, torrent_name),
+                traceback.format_exc(),
+            )
 
 
 def get_manager_types():

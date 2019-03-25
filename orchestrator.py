@@ -47,7 +47,7 @@ class AlcazarOrchestrator:
         try:
             while True:
                 logger.debug('Iter :)')
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.2)
         except CancelledError:
             pass
 

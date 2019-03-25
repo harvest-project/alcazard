@@ -8,7 +8,7 @@ DHT_BOOTSTRAP_NODES = [
     'dht.aelitis.com:6881',
 ]
 
-LOOP_INTERVAL = 0.1  # Interval in seconds between loop iterations (popping alerts)
+LOOP_INTERVAL = 0.2  # Interval in seconds between loop iterations (popping alerts)
 SLOW_LOOP_THRESHOLD = 0.5  # Slower loops than this many seconds emits a warning
 POST_UPDATES_INTERVAL = 3  # Post updates every 3 minutes
 SAVE_RESUME_DATA_INTERVAL = 15 * 60  # Save resume data for all torrents (that need it) every 15 minutes

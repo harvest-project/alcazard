@@ -1,6 +1,7 @@
 import json
 
 import peewee
+from playhouse import migrate
 from playhouse.shortcuts import model_to_dict, update_model_from_dict
 
 from utils import get_ports_from_ranges, parse_port_pools_fmt, generate_password
@@ -15,6 +16,8 @@ class Config(peewee.Model):
     is_dht_enabled = peewee.BooleanField(null=True)
     local_port_pools_fmt = peewee.TextField(null=True)
     peer_port_pools_fmt = peewee.TextField(null=True)
+    clean_directories_on_remove = peewee.BooleanField(default=False)
+    clean_torrent_file_on_remove = peewee.BooleanField(default=False)
 
     @property
     def transmission_settings(self):
@@ -134,6 +137,17 @@ MODELS = [
     Migration,
 ]
 
+
+def _add_config_clean_options(migrator):
+    clean_directories_on_remove = peewee.BooleanField(default=False)
+    clean_torrent_file_on_remove = peewee.BooleanField(default=False)
+    migrate.migrate(
+        migrator.add_column('config', 'clean_directories_on_remove', clean_directories_on_remove),
+        migrator.add_column('config', 'clean_torrent_file_on_remove', clean_torrent_file_on_remove),
+    )
+
+
 MIGRATIONS = [
     ('0001_initial', lambda: None),
+    ('0002_add_config_clean_options', _add_config_clean_options),
 ]
