@@ -11,7 +11,7 @@ import peewee
 import migrations
 import models
 from alcazar_logging import BraceAdapter
-from clients import Manager, PeriodicTaskInfo, TorrentBatchUpdate
+from clients import Manager, PeriodicTaskInfo, TorrentBatchUpdate, TorrentAlreadyAddedException
 from error_manager import Severity
 from libtorrent_impl import params, lt_models
 from libtorrent_impl.speedups import session
@@ -191,12 +191,18 @@ class ManagedLibtorrent(Manager):
 
     async def add_torrent(self, torrent_file, download_path, name):
         logger.debug('Adding torrent to {}', download_path)
-        data = await self._exec(
-            self._session.add_torrent,
-            torrent_file,
-            download_path,
-            name,
-        )
+        try:
+            data = await self._exec(
+                self._session.add_torrent,
+                torrent_file,
+                download_path,
+                name,
+            )
+        except Exception as exc:
+            if str(exc) == 'torrent already exists in session':
+                raise TorrentAlreadyAddedException()
+            else:
+                raise
         batch = TorrentBatchUpdate()
         batch.added[data['info_hash']] = data
         self._orchestrator.on_torrent_batch_update(self, batch)
