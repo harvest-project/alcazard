@@ -63,6 +63,7 @@ bool TorrentState::update_from_status(lt::torrent_status *status) {
     UPDATE_STATE(this->upload_rate, status->upload_payload_rate <= 2 ? 0 : status->upload_payload_rate);
     UPDATE_STATE(this->progress, status->progress);
     UPDATE_STATE(this->error, status->error);
+    UPDATE_STATE(this->date_added, status->added_time);
     return updated;
 }
 

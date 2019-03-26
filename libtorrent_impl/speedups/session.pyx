@@ -3,6 +3,7 @@ import time
 
 from cython.operator cimport dereference as deref
 from libc.stdint cimport int64_t, uint64_t
+from libc.time cimport time_t
 from libcpp cimport bool as cbool
 from libcpp.string cimport string
 from libcpp.vector cimport vector
@@ -17,6 +18,9 @@ from utils import timezone_now
 from .libtorrent cimport to_hex
 
 import logging
+import datetime
+import pytz
+
 from clients import SessionStats, TorrentBatchUpdate
 
 logger = logging.getLogger(__name__)
@@ -35,16 +39,17 @@ cdef extern from "SessionWrapper.hpp":
     cdef cppclass TorrentState:
         string info_hash
         int status
-        string name;
-        string download_path;
-        int64_t size;
-        int64_t downloaded;
-        int64_t uploaded;
-        int64_t download_rate;
-        int64_t upload_rate;
-        double progress;
-        string error;
-        string tracker_error;
+        string name
+        string download_path
+        int64_t size
+        int64_t downloaded
+        int64_t uploaded
+        int64_t download_rate
+        int64_t upload_rate
+        double progress
+        string error
+        string tracker_error
+        time_t date_added
 
     ctypedef struct TimerStat:
         int64_t count
@@ -151,7 +156,8 @@ cdef class LibtorrentSession:
             'progress': deref(state).progress,
             'error': error.decode() if error.size() else None,
             'tracker_error': tracker_error.decode() if tracker_error.size() else None,
-            'date_added': None,
+            'date_added': datetime.datetime.utcfromtimestamp(deref(state).date_added).replace(
+                tzinfo=pytz.utc).isoformat(),
         }
 
     cdef void _update_manager_session_stats(self, dict prev_metrics, dict new_metrics) except *:

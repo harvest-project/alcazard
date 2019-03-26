@@ -53,6 +53,7 @@ public:
     double progress;
     std::string error;
     std::string tracker_error;
+    time_t date_added;
 
     TorrentState(int64_t row_id, lt::torrent_status *status);
     void insert_db_row(sqlite3 *db, std::string torrent_file, std::string download_path, std::string *name_ptr);

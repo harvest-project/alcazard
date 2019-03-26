@@ -48,11 +48,7 @@ void SessionWrapper::init_settings_pack(lt::settings_pack *pack) {
                   "router.bittorrent.com:6881,router.utorrent.com:6881,router.bitcomet.com:6881,dht.transmissionbt.com:6881,"
                   "dht.aelitis.com:6881");
     pack->set_int(lt::settings_pack::alert_queue_size, 4 * 1000 * 1000);
-    pack->set_int(lt::settings_pack::cache_size, 4096);
     pack->set_int(lt::settings_pack::tick_interval, 1000);
-    pack->set_int(lt::settings_pack::connections_limit, 400);
-    pack->set_int(lt::settings_pack::listen_queue_size, 32);
-    pack->set_int(lt::settings_pack::checking_mem_usage, 2048);
     pack->set_int(lt::settings_pack::aio_threads, 8);
     pack->set_bool(lt::settings_pack::listen_system_port_fallback, false);
     pack->set_int(lt::settings_pack::max_retry_port_bind, 0);
