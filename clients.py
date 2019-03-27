@@ -303,6 +303,7 @@ class Manager(ABC):
             while self._can_clean_directory(start_dir):
                 logger.info('Removing cleanable directory {}.'.format(start_dir))
                 shutil.rmtree(start_dir)
+                start_dir = os.path.dirname(start_dir)
         except Exception as exc:
             self._error_manager.add_error(
                 Severity.ERROR,
