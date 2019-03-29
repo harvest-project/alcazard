@@ -41,6 +41,7 @@ class ManagedTransmission(BaseTransmission):
             'peer-port': self._peer_port,
             'rpc-username': 'transmission',
             'rpc-password': self.instance_config.rpc_password,
+            'preallocation': 2 if self.config.enable_file_preallocation else 1,  # 2 is full, 1 is fast (default)
         })
         os.makedirs(self._state_path, exist_ok=True)
         with open(self._settings_path, 'w') as f:

@@ -6,6 +6,7 @@
 #include <libtorrent/error_code.hpp>
 #include <libtorrent/session_stats.hpp>
 #include <libtorrent/bencode.hpp>
+#include <libtorrent/storage_defs.hpp>
 
 #include "SqliteHelper.hpp"
 #include "Utils.hpp"
@@ -19,8 +20,12 @@ Logger logger("SessionWrapper");
 SessionWrapper::SessionWrapper(
         std::string db_path,
         std::string listen_interfaces,
-        bool enable_dht)
-        : session(NULL), db(NULL), num_initial_torrents(-1), num_loaded_initial_torrents(-2) {
+        bool enable_dht,
+        bool enable_file_preallocation)
+        : session(NULL), db(NULL),
+          enable_file_preallocation(enable_file_preallocation),
+          num_initial_torrents(-1),
+          num_loaded_initial_torrents(-2) {
     logger.debug("Opening SQLite DB.");
     SQLITE_CHECK(sqlite3_open_v2(db_path.c_str(), &this->db, SQLITE_OPEN_READWRITE, NULL));
 
@@ -155,6 +160,7 @@ void SessionWrapper::init_add_params(lt::add_torrent_params &params, std::string
     params.ti = boost::shared_ptr<lt::torrent_info>(
             new lt::torrent_info(torrent.c_str(), torrent.size()));
     params.save_path = download_path;
+    params.storage_mode = this->enable_file_preallocation ? lt::storage_mode_allocate : lt::storage_mode_sparse;
     if (resume_data != NULL) {
         params.resume_data = std::vector<char>(resume_data->begin(), resume_data->end());
     }

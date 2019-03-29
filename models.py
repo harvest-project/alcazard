@@ -18,6 +18,7 @@ class Config(peewee.Model):
     peer_port_pools_fmt = peewee.TextField(null=True)
     clean_directories_on_remove = peewee.BooleanField(default=False)
     clean_torrent_file_on_remove = peewee.BooleanField(default=False)
+    enable_file_preallocation = peewee.BooleanField(default=False)
 
     @property
     def transmission_settings(self):
@@ -147,7 +148,15 @@ def _add_config_clean_options(migrator):
     )
 
 
+def _add_enable_file_preallocation(migrator):
+    enable_file_preallocation = peewee.BooleanField(default=False)
+    migrate.migrate(
+        migrator.add_column('config', 'enable_file_preallocation', enable_file_preallocation)
+    )
+
+
 MIGRATIONS = [
     ('0001_initial', lambda: None),
     ('0002_add_config_clean_options', _add_config_clean_options),
+    ('0003_add_enable_file_preallocation', _add_enable_file_preallocation),
 ]

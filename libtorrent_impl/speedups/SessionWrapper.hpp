@@ -20,6 +20,7 @@ class SessionWrapper {
 private:
     libtorrent::session *session;
     sqlite3 *db;
+    bool enable_file_preallocation;
     TimerAccumulator timers;
     int num_initial_torrents;
     int num_loaded_initial_torrents;
@@ -93,7 +94,8 @@ public:
     SessionWrapper(
             std::string db_path,
             std::string listen_interfaces,
-            bool enable_dht
+            bool enable_dht,
+            bool enable_file_preallocation
     );
     ~SessionWrapper();
 

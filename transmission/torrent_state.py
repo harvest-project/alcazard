@@ -1,3 +1,7 @@
+import datetime
+
+import pytz
+
 from clients import TorrentState, FieldInfo
 from transmission import params
 from transmission.params import STATUS_MAPPING
@@ -18,6 +22,10 @@ def _get_tracker_errors(tracker_stats):
     return None
 
 
+def convert_date_added(torrent):
+    return
+
+
 class TransmissionTorrentState(TorrentState):
     _FIELD_MAPPING = [
         FieldInfo('name', 'name'),
@@ -29,7 +37,8 @@ class TransmissionTorrentState(TorrentState):
         FieldInfo('download_rate', 'rateDownload'),
         FieldInfo('upload_rate', 'rateUpload'),
         FieldInfo('progress', 'percentDone'),
-        FieldInfo('date_added', None, converter=lambda _: None),
+        FieldInfo('date_added', None, converter=lambda torrent: datetime.datetime.utcfromtimestamp(
+            torrent._fields['addedDate'].value).replace(tzinfo=pytz.utc).isoformat()),
         FieldInfo('error', 'errorString', converter=lambda x: x if x else None),
         FieldInfo('tracker_error', 'trackerStats', converter=_get_tracker_errors)
     ]

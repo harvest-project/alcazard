@@ -73,6 +73,7 @@ cdef extern from "SessionWrapper.hpp":
                 string db_path,
                 string listen_interfaces,
                 cbool enable_dht,
+                cbool enable_file_preallocation,
         ) nogil except +
 
         int load_initial_torrents() nogil except +
@@ -101,10 +102,12 @@ cdef class LibtorrentSession:
         SessionWrapper *wrapper
         str name
 
-    def __init__(self, manager, str db_path, str listen_interfaces, cbool enable_dht):
+    def __init__(self, manager, str db_path, str listen_interfaces):
         cdef:
             string c_db_path = db_path.encode()
             string c_listen_interfaces = listen_interfaces.encode()
+            cbool c_enable_dht
+            cbool c_enable_file_preallocation
 
         set_level(<Level> <int> logging.getLogger('').level)
 
@@ -118,11 +121,15 @@ cdef class LibtorrentSession:
         self.start_total_downloaded = self.instance_config.total_downloaded
         self.start_total_uploaded = self.instance_config.total_uploaded
 
+        c_enable_dht = self.config.is_dht_enabled
+        c_enable_file_preallocation = self.config.enable_file_preallocation
+
         with nogil:
             self.wrapper = new SessionWrapper(
                 c_db_path,
                 c_listen_interfaces,
-                enable_dht,
+                c_enable_dht,
+                c_enable_file_preallocation,
             )
 
     def __dealloc__(self):

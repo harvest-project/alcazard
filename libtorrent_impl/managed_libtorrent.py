@@ -86,7 +86,6 @@ class ManagedLibtorrent(Manager):
             manager=self,
             db_path=self._state_path,
             listen_interfaces='0.0.0.0:{0},[::]:{0}'.format(self._peer_port),
-            enable_dht=self.config.is_dht_enabled,
         )
 
         asyncio.ensure_future(self._loop())
@@ -97,7 +96,7 @@ class ManagedLibtorrent(Manager):
         start = time.time()
         num_loaded = await self._exec(self._session.load_initial_torrents)
         while True:
-            if not self._metrics or num_loaded != self._metrics.get('alcazar.torrents.count[gauge]'):
+            if not self._metrics or num_loaded > self._metrics.get('alcazar.torrents.count[gauge]'):
                 logger.debug('Still waiting for batch to load.')
                 await asyncio.sleep(2)
                 continue
