@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from asyncio import CancelledError
-from collections import defaultdict, Counter
+from collections import defaultdict
 
 from alcazar_logging import BraceAdapter
 from clients import get_manager_types, TorrentNotFoundException, TorrentBatchUpdate
@@ -11,7 +11,13 @@ logger = BraceAdapter(logging.getLogger(__name__))
 
 
 class NoManagerForRealmException(Exception):
-    pass
+    def __init__(self):
+        super().__init__('No managers loaded for the chosen realm.')
+
+
+class NotInitializedException(Exception):
+    def __init__(self):
+        super().__init__('Refusing add/remove operations until all managers are initialized.')
 
 
 class AlcazarOrchestrator:
@@ -85,19 +91,19 @@ class AlcazarOrchestrator:
         realm_managers = self.managers_by_realm[realm.id]
         if not realm_managers:
             raise NoManagerForRealmException()
-        # Get a dict {manager: count} for the torrent counts
-        torrent_counts = Counter(self.realm_info_hash_manager[realm.id].values())
-        # Choose the manager with the smallest count from torrent_counts
-        manager = min(realm_managers, key=lambda m: torrent_counts.get(m, 0))
+        if not all(m.initialized and m.session_stats for m in realm_managers):
+            raise NotInitializedException()
+        # Choose the manager with the smallest torrent count from session_stats
+        manager = min(realm_managers, key=lambda m: m.session_stats.torrent_count)
         return await manager.add_torrent(torrent_file, download_path, name)
 
     async def remove_torrent(self, realm, info_hash):
         logger.info('Removing torrent {} from realm {}', info_hash, realm)
+        if not all(m.initialized and m.session_stats for m in self.managers_by_realm[realm.id]):
+            raise NotInitializedException()
         manager = self.realm_info_hash_manager[realm.id].get(info_hash)
         if not manager:
             raise TorrentNotFoundException()
-        if not manager.initialized:
-            raise Exception('Trying to remove a torrent from a manager that is not fully initialized.')
         await manager.remove_torrent(info_hash)
 
     def on_torrent_batch_update(self, manager, batch):
