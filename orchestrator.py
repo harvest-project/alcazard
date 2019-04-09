@@ -21,6 +21,8 @@ class NotInitializedException(Exception):
 
 
 class AlcazarOrchestrator:
+    OP_TIMEOUT = 30
+
     def __init__(self, config):
         self.config = config
         self.available_local_ports = config.local_ports
@@ -29,6 +31,7 @@ class AlcazarOrchestrator:
         self.manager_types = get_manager_types()
         self.managers_by_realm = defaultdict(list)
         self.realm_by_id = {}
+        self.op_lock = asyncio.Lock()
 
         self.realm_info_hash_manager = defaultdict(dict)
         self.realm_accumulated_batch = defaultdict(TorrentBatchUpdate)
@@ -58,13 +61,14 @@ class AlcazarOrchestrator:
             pass
 
     async def shutdown(self):
-        logger.info('Shutting down orchestrator now...')
-        tasks = []
-        for managers in self.managers_by_realm.values():
-            for manager in managers:
-                tasks.append(manager.shutdown())
-        await asyncio.gather(*tasks)
-        logger.info('Clients are down.')
+        with (await self.op_lock):
+            logger.info('Shutting down orchestrator now...')
+            tasks = []
+            for managers in self.managers_by_realm.values():
+                for manager in managers:
+                    tasks.append(manager.shutdown())
+            await asyncio.gather(*tasks)
+            logger.info('Clients are down.')
 
     def _load_manager_for_config(self, manager_class, instance_config):
         if __debug__:
@@ -86,25 +90,27 @@ class AlcazarOrchestrator:
         return instance
 
     async def add_torrent(self, realm, torrent_file, download_path, name):
-        logger.info('Adding torrent to realm {}', realm)
-        # Get the managers that we're interested in (chosen realm)
-        realm_managers = self.managers_by_realm[realm.id]
-        if not realm_managers:
-            raise NoManagerForRealmException()
-        if not all(m.initialized and m.session_stats for m in realm_managers):
-            raise NotInitializedException()
-        # Choose the manager with the smallest torrent count from session_stats
-        manager = min(realm_managers, key=lambda m: m.session_stats.torrent_count)
-        return await manager.add_torrent(torrent_file, download_path, name)
+        with (await asyncio.wait_for(self.op_lock, timeout=self.OP_TIMEOUT)):
+            logger.info('Adding torrent to realm {}', realm)
+            # Get the managers that we're interested in (chosen realm)
+            realm_managers = self.managers_by_realm[realm.id]
+            if not realm_managers:
+                raise NoManagerForRealmException()
+            if not all(m.initialized and m.session_stats for m in realm_managers):
+                raise NotInitializedException()
+            # Choose the manager with the smallest torrent count from session_stats
+            manager = min(realm_managers, key=lambda m: m.session_stats.torrent_count)
+            return await manager.add_torrent(torrent_file, download_path, name)
 
     async def remove_torrent(self, realm, info_hash):
-        logger.info('Removing torrent {} from realm {}', info_hash, realm)
-        if not all(m.initialized and m.session_stats for m in self.managers_by_realm[realm.id]):
-            raise NotInitializedException()
-        manager = self.realm_info_hash_manager[realm.id].get(info_hash)
-        if not manager:
-            raise TorrentNotFoundException()
-        await manager.remove_torrent(info_hash)
+        with (await asyncio.wait_for(self.op_lock, timeout=self.OP_TIMEOUT)):
+            logger.info('Removing torrent {} from realm {}', info_hash, realm)
+            if not all(m.initialized and m.session_stats for m in self.managers_by_realm[realm.id]):
+                raise NotInitializedException()
+            manager = self.realm_info_hash_manager[realm.id].get(info_hash)
+            if not manager:
+                raise TorrentNotFoundException()
+            await manager.remove_torrent(info_hash)
 
     def on_torrent_batch_update(self, manager, batch):
         logger.debug('Orchestrator received batch update with {} adds, {} updates and {} deletes'.format(

@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 
@@ -68,11 +69,17 @@ class AlcazarAPI:
             realm = Realm.select().where(Realm.name == data['realm']).first()
             if not realm:
                 realm = Realm.create(name=data['realm'])
-            instance = self.orchestrator.add_instance(
-                realm=realm,
-                instance_type=data['instance_type'],
-                config_kwargs=data.get('config', {}),
-            )
+            try:
+                instance = self.orchestrator.add_instance(
+                    realm=realm,
+                    instance_type=data['instance_type'],
+                    config_kwargs=data.get('config', {}),
+                )
+            except asyncio.TimeoutError:
+                return JsonResponse(
+                    data={'detail': 'Alcazar is busy performing another action. Try again later.'},
+                    status=503,
+                )
         return JsonResponse(instance.get_info_dict())
 
     @jsonify_exceptions
@@ -105,6 +112,8 @@ class AlcazarAPI:
             return JsonResponse({'detail': str(exc)}, status=400)
         except TorrentAlreadyAddedException as exc:
             return JsonResponse({'detail': str(exc)}, status=409)
+        except asyncio.TimeoutError:
+            return JsonResponse({'detail': 'Alcazar is busy performing another action. Try again later.'}, status=503)
         return JsonResponse(data)
 
     @jsonify_exceptions
@@ -121,6 +130,8 @@ class AlcazarAPI:
             return JsonResponse({})
         except TorrentNotFoundException:
             return JsonResponse({'detail': 'Torrent not found.'}, status=404)
+        except asyncio.TimeoutError:
+            return JsonResponse({'detail': 'Alcazar is busy performing another action. Try again later.'}, status=503)
 
     @jsonify_exceptions
     async def post_pop_update_batch(self, request):
