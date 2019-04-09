@@ -14,7 +14,18 @@ Logger TorrentState::logger("TorrentState");
 #define UPDATE_STATE(A, B) { auto __temp = B; if (A != __temp) { A = __temp; updated = true; } }
 
 TorrentState::TorrentState(int64_t row_id, lt::torrent_status *status)
-        : handle(status->handle), row_id(row_id), tracker_status(TRACKER_STATUS_PENDING) {
+        : handle(status->handle)
+        , row_id(row_id)
+        , tracker_status(TRACKER_STATUS_PENDING)
+        , status(STATUS_CHECK_WAITING)
+        , downloaded(0)
+        , uploaded(0)
+        , download_rate(0)
+        , upload_rate(0)
+        , progress(0)
+        , error("")
+        , tracker_error("")
+        , date_added(0) {
     this->info_hash = status->info_hash.to_string();
     this->name = status->name;
     this->download_path = status->save_path;
