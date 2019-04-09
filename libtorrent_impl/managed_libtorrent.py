@@ -75,6 +75,13 @@ class ManagedLibtorrent(Manager):
         lt_models.LT_DB.initialize(db)
         with db:
             migrations.apply_migrations(lt_models.LT_DB, lt_models.LT_MODELS, lt_models.LT_MIGRATIONS)
+            try:
+                lt_models.SessionStats.select().get()
+            except peewee.DoesNotExist:
+                lt_models.SessionStats(
+                    total_downloaded=0,
+                    total_uploaded=0,
+                ).save()
 
         self._peer_port = self._orchestrator.grab_peer_port()
         logger.debug('Received peer_port={} for {}', self._peer_port, self._name)

@@ -35,6 +35,7 @@ SessionWrapper::SessionWrapper(
     pack.set_bool(lt::settings_pack::enable_dht, enable_dht);
 
     this->init_metrics_names();
+    this->read_session_stats();
 
     logger.info("Creating libtorrent session.");
     this->session = new libtorrent::session(pack);
@@ -77,6 +78,17 @@ void SessionWrapper::init_settings_pack(lt::settings_pack *pack) {
     pack->set_int(lt::settings_pack::active_tracker_limit, -1);
     pack->set_int(lt::settings_pack::active_lsd_limit, -1);
     pack->set_int(lt::settings_pack::active_limit, -1);
+}
+
+void SessionWrapper::read_session_stats() {
+    logger.debug("Reading session stats");
+    SqliteStatement stmt = SqliteStatement(this->db, "SELECT total_downloaded, total_uploaded FROM sessionstats");
+    if (!stmt.step()) {
+        throw std::runtime_error("Unable to read session stats.");
+    }
+    this->start_total_downloaded = stmt.get_int64(0);
+    this->start_total_uploaded = stmt.get_int64(1);
+    logger.debug("Read session stats");
 }
 
 void SessionWrapper::init_metrics_names() {
@@ -370,6 +382,24 @@ void SessionWrapper::calculate_torrent_count_metrics(BatchTorrentUpdate *update)
             lt::torrent_status::checking_resume_data];
 }
 
+void SessionWrapper::update_session_stats(BatchTorrentUpdate *update) {
+    int64_t total_downloaded = this->start_total_downloaded + update->metrics["net.recv_payload_bytes[counter]"];
+    int64_t total_uploaded = this->start_total_uploaded + update->metrics["net.sent_payload_bytes[counter]"];
+    update->metrics["alcazar.session.total_downloaded[counter]"] = total_downloaded;
+    update->metrics["alcazar.session.total_uploaded[counter]"] = total_uploaded;
+
+    logger.debug("Updating session stats");
+    SqliteStatement stmt = SqliteStatement(
+            this->db, "UPDATE sessionstats SET total_downloaded = ?001, total_uploaded = ?002");
+    stmt.bind_int64(1, total_downloaded);
+    stmt.bind_int64(2, total_uploaded);
+    int num_changes = stmt.update();
+    if (num_changes != 1) {
+        logger.error("Save session stats affected %d rows!", num_changes);
+    }
+    logger.debug("Updated session stats");
+}
+
 void SessionWrapper::on_alert_session_stats(BatchTorrentUpdate *update, lt::session_stats_alert *alert) {
     logger.debug("Received session stats.");
     for (auto &item : this->metrics_names) {
@@ -378,6 +408,7 @@ void SessionWrapper::on_alert_session_stats(BatchTorrentUpdate *update, lt::sess
     // Piggyback a session stats update to post timers and update torrent count metrics
     update->timer_stats = this->timers.stats;
     this->calculate_torrent_count_metrics(update);
+    this->update_session_stats(update);
 }
 
 void SessionWrapper::on_alert_torrent_finished(BatchTorrentUpdate *update, lt::torrent_finished_alert *alert) {
@@ -424,7 +455,6 @@ void SessionWrapper::on_alert_save_resume_data(BatchTorrentUpdate *update, lt::s
     int num_changes = stmt.update();
     if (num_changes != 1) {
         logger.error("Save resume data affected %d rows!", num_changes);
-        return;
     }
 }
 

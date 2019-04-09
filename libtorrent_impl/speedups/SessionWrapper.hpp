@@ -24,6 +24,8 @@ private:
     TimerAccumulator timers;
     int num_initial_torrents;
     int num_loaded_initial_torrents;
+    int64_t start_total_downloaded;
+    int64_t start_total_uploaded;
     std::shared_ptr <Timer> timer_initial_torrents_received;
     std::vector <std::pair<std::string, int>> metrics_names;
     std::unordered_map <std::string, int64_t> added_torrent_row_ids;
@@ -33,11 +35,13 @@ private:
     bool succeeded_listening = false;
 
     void init_settings_pack(lt::settings_pack *pack);
+    void read_session_stats();
     void init_metrics_names();
     void init_add_params(lt::add_torrent_params &params, std::string torrent, std::string download_path,
                          std::string *name, std::string *resume_data);
     std::shared_ptr <TorrentState> handle_torrent_added(lt::torrent_status *status);
     void calculate_torrent_count_metrics(BatchTorrentUpdate *update);
+    void update_session_stats(BatchTorrentUpdate *update);
     void apply_pre_load_tracker_state(std::shared_ptr <TorrentState> state);
     void on_alert_add_torrent(BatchTorrentUpdate *update, lt::add_torrent_alert *alert);
     void on_alert_state_update(BatchTorrentUpdate *update, lt::state_update_alert *alert);

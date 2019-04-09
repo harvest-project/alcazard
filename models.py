@@ -56,14 +56,20 @@ class Realm(peewee.Model):
 class ManagerConfig(peewee.Model):
     realm = peewee.ForeignKeyField(Realm, backref='managed_transmissions')
 
-
-class ManagedTransmissionConfig(ManagerConfig, peewee.Model):
-    rpc_password = peewee.TextField()
-
     def to_dict(self):
         result = model_to_dict(self, exclude=(ManagedTransmissionConfig.realm,), recurse=False)
         result['realm'] = self.realm.name
         return result
+
+    @classmethod
+    def create_new(cls, realm):
+        return cls.create(
+            realm=realm,
+        )
+
+
+class ManagedTransmissionConfig(ManagerConfig, peewee.Model):
+    rpc_password = peewee.TextField()
 
     @classmethod
     def create_new(cls, realm):
@@ -82,11 +88,6 @@ class RemoteTransmissionConfig(ManagerConfig, peewee.Model):
     rpc_username = peewee.TextField()
     rpc_password = peewee.TextField()
 
-    def to_dict(self):
-        result = model_to_dict(self, exclude=(ManagedTransmissionConfig.realm,), recurse=False)
-        result['realm'] = self.realm.name
-        return result
-
     @classmethod
     def create_new(cls, realm, rpc_host, rpc_port, rpc_username, rpc_password):
         return cls.create(
@@ -102,22 +103,6 @@ class RemoteTransmissionConfig(ManagerConfig, peewee.Model):
 
 
 class ManagedLibtorrentConfig(ManagerConfig, peewee.Model):
-    total_downloaded = peewee.BigIntegerField()
-    total_uploaded = peewee.BigIntegerField()
-
-    def to_dict(self):
-        result = model_to_dict(self, exclude=(ManagedTransmissionConfig.realm,), recurse=False)
-        result['realm'] = self.realm.name
-        return result
-
-    @classmethod
-    def create_new(cls, realm):
-        return cls.create(
-            realm=realm,
-            total_downloaded=0,
-            total_uploaded=0,
-        )
-
     class Meta:
         database = DB
 
@@ -151,7 +136,14 @@ def _add_config_clean_options(migrator):
 def _add_enable_file_preallocation(migrator):
     enable_file_preallocation = peewee.BooleanField(default=False)
     migrate.migrate(
-        migrator.add_column('config', 'enable_file_preallocation', enable_file_preallocation)
+        migrator.add_column('config', 'enable_file_preallocation', enable_file_preallocation),
+    )
+
+
+def _remove_libtorrent_session_stats(migrator):
+    migrate.migrate(
+        migrator.drop_column('managedlibtorrentconfig', 'total_downloaded'),
+        migrator.drop_column('managedlibtorrentconfig', 'total_uploaded'),
     )
 
 
@@ -159,4 +151,5 @@ MIGRATIONS = [
     ('0001_initial', lambda: None),
     ('0002_add_config_clean_options', _add_config_clean_options),
     ('0003_add_enable_file_preallocation', _add_enable_file_preallocation),
+    ('0004_remove_libtorrent_session_stats', _remove_libtorrent_session_stats),
 ]

@@ -117,10 +117,6 @@ cdef class LibtorrentSession:
         self.instance_config = manager.instance_config
         self.name = manager.name
 
-        # Counters for when the session is started, so that we can add libtorrent's session stats to those
-        self.start_total_downloaded = self.instance_config.total_downloaded
-        self.start_total_uploaded = self.instance_config.total_uploaded
-
         c_enable_dht = self.config.is_dht_enabled
         c_enable_file_preallocation = self.config.enable_file_preallocation
 
@@ -168,30 +164,13 @@ cdef class LibtorrentSession:
         }
 
     cdef void _update_manager_session_stats(self, dict prev_metrics, dict new_metrics) except *:
-        cdef:
-            int64_t payload_download = new_metrics['net.recv_payload_bytes[counter]']
-            int64_t payload_upload = new_metrics['net.sent_payload_bytes[counter]']
-
         self.manager._session_stats = SessionStats(
             torrent_count=new_metrics['ses.num_loaded_torrents[gauge]'],
-            downloaded=self.start_total_downloaded + payload_download,
-            uploaded=self.start_total_uploaded + payload_upload,
+            downloaded=new_metrics['alcazar.session.total_downloaded[counter]'],
+            uploaded=new_metrics['alcazar.session.total_uploaded[counter]'],
             download_rate=calc_dict_rate(prev_metrics, new_metrics, 'net.recv_payload_bytes[counter]'),
             upload_rate=calc_dict_rate(prev_metrics, new_metrics, 'net.sent_payload_bytes[counter]'),
         )
-
-        updated = (
-                self.instance_config.total_downloaded != self.manager._session_stats.downloaded or
-                self.instance_config.total_uploaded != self.manager._session_stats.uploaded
-        )
-        if updated:
-            logger.debug('Updating session stats in DB.')
-            self.instance_config.total_downloaded = self.manager._session_stats.downloaded
-            self.instance_config.total_uploaded = self.manager._session_stats.uploaded
-            self.instance_config.save(only=(
-                ManagedLibtorrentConfig.total_downloaded,
-                ManagedLibtorrentConfig.total_uploaded,
-            ))
 
     cdef void _update_session_metrics(self, BatchTorrentUpdate update) except *:
         cdef:
@@ -241,7 +220,6 @@ cdef class LibtorrentSession:
         with nogil:
             update = self.wrapper.process_alerts(c_shutting_down)
 
-        logger.debug('Updating session metrics')
         self._update_session_metrics(update)
 
         # Short-circuit empty update batches

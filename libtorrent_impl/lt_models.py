@@ -3,6 +3,14 @@ import peewee
 LT_DB = peewee.Proxy()
 
 
+class SessionStats(peewee.Model):
+    total_downloaded = peewee.BigIntegerField()
+    total_uploaded = peewee.BigIntegerField()
+
+    class Meta:
+        database = LT_DB
+
+
 class Torrent(peewee.Model):
     info_hash = peewee.CharField(max_length=40, unique=True)
     torrent_file = peewee.BlobField()
@@ -22,6 +30,7 @@ class Migration(peewee.Model):
 
 
 LT_MODELS = [
+    SessionStats,
     Torrent,
     Migration,
 ]
