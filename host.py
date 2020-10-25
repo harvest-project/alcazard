@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import resource
 
 from alcazar_logging import BraceAdapter
 from api import AlcazarAPI
@@ -14,8 +15,14 @@ logger = BraceAdapter(logging.getLogger(__name__))
 
 class AlcazarHost:
     def __init__(self, state_path):
+        self._init_rlimit()
         self.state_path = state_path
         self.db_path = os.path.join(state_path, 'db.sqlite3')
+
+    def _init_rlimit(self):
+        _, hard_nofile = resource.getrlimit(resource.RLIMIT_NOFILE)
+        # Raise the nofile limit to the hard limit
+        resource.setrlimit(resource.RLIMIT_NOFILE, (hard_nofile, hard_nofile))
 
     def _init_db(self):
         apply_migrations(DB, MODELS, MIGRATIONS)

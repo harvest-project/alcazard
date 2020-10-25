@@ -1,7 +1,7 @@
-aiohttp==3.5.4
-Jinja2==2.10.1
-peewee==3.9.4
+aiohttp==3.6.2
+Jinja2==2.11.2
+peewee==3.13.3
 transmissionrpc==0.11
-pytz==2019.1
-bencode.py==2.0.0
-Cython==0.29.7
+pytz==2020.1
+bencode.py==4.0.0
+Cython==0.29.13

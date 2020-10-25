@@ -1,4 +1,3 @@
-from libc.stdint cimport int64_t
 from libcpp.string cimport string
 
 cdef extern from 'libtorrent/hex.hpp' namespace 'libtorrent':

@@ -59,6 +59,12 @@ void SessionWrapper::init_settings_pack(lt::settings_pack *pack) {
     pack->set_bool(lt::settings_pack::listen_system_port_fallback, false);
     pack->set_int(lt::settings_pack::max_retry_port_bind, 0);
     pack->set_int(lt::settings_pack::unchoke_slots_limit, 64);
+    // Disable read caching to try avoid seeming memory leaks and save memory
+    pack->set_bool(lt::settings_pack::use_read_cache, false);
+    // Reduce peer list size to save memory, down from 4000
+    pack->set_bool(lt::settings_pack::max_peerlist_size, 256);
+    // Reduce send buffers to conserve memory, down from 500 * 1024
+    pack->set_int(lt::settings_pack::send_buffer_watermark, 200 * 1024);
 
     pack->set_int(lt::settings_pack::tracker_completion_timeout, 120);
     pack->set_int(lt::settings_pack::tracker_receive_timeout, 60);
@@ -166,7 +172,6 @@ void SessionWrapper::init_add_params(lt::add_torrent_params &params, std::string
                                      std::string *name, std::string *resume_data) {
     params.flags = lt::add_torrent_params::flag_pinned |
                    lt::add_torrent_params::flag_update_subscribe |
-                   lt::add_torrent_params::flag_auto_managed |
                    lt::add_torrent_params::flag_apply_ip_filter |
                    lt::add_torrent_params::flag_duplicate_is_error;
     params.ti = boost::shared_ptr<lt::torrent_info>(

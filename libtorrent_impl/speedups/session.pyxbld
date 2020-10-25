@@ -17,8 +17,10 @@ def make_ext(modname, pyxfilename):
         language='c++',
         extra_compile_args=[
             '-std=c++11',
-            '-Werror',
+            #'-Werror',
             '-Wno-unreachable-code',
+            '-O2',
+            '-march=native',
 
             '-I{}'.format(os.path.dirname(__file__)),
             '-I/usr/local/Cellar/boost/1.68.0_1/include/',
