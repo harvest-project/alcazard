@@ -49,7 +49,7 @@ class AlcazarOrchestrator:
             config_type = manager_class.config_model
             for instance_config in config_type.select().order_by(config_type.id):
                 self._load_manager_for_config(manager_class, instance_config)
-            return
+
 
         asyncio.ensure_future(self._run())
 
