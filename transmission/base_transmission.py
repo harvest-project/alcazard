@@ -182,5 +182,38 @@ class BaseTransmission(Manager):
         self._register_t_torrent_delete(batch, info_hash)
         self._orchestrator.on_torrent_batch_update(self, batch)
 
+    async def force_reannounce(self, info_hash):
+        if not self._initialized:
+            message = 'Unable to reannounce torrent {} from {}: not fully started up yet.'.format(
+                info_hash, self._name)
+            logger.error(message)
+            raise Exception(message)
+
+        logger.info('Reannouncing torrent {} from {}', info_hash, self._name)
+        torrent_state = self._torrent_states[info_hash]
+        await self._executor.force_reannounce(torrent_state.transmission_id)
+
+    async def force_recheck(self, info_hash):
+        if not self._initialized:
+            message = 'Unable to recheck torrent {} from {}: not fully started up yet.'.format(
+                info_hash, self._name)
+            logger.error(message)
+            raise Exception(message)
+
+        logger.info('Rechecking torrent {} from {}', info_hash, self._name)
+        torrent_state = self._torrent_states[info_hash]
+        await self._executor.recheck_data(torrent_state.transmission_id)
+
+    async def move_data(self, info_hash, download_path):
+        if not self._initialized:
+            message = 'Unable to move torrent {} from {}: not fully started up yet.'.format(
+                info_hash, self._name)
+            logger.error(message)
+            raise Exception(message)
+
+        logger.info('Moving torrent {} from {} to {}', info_hash, self._name, download_path)
+        torrent_state = self._torrent_states[info_hash]
+        raise NotImplementedError()
+
     async def get_session_stats(self):
         return self._session_stats

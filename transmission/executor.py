@@ -98,5 +98,23 @@ class TransmissionAsyncExecutor:
         logger.debug('Get session stats')
         return self._client.session_stats()
 
+    def _force_recheck(self, t_id):
+        return self._client.verify_torrent(t_id)
+
+    def _force_reannounce(self, t_id):
+        return self._client.reannounce_torrent(t_id)
+
+    def _move_data(self, t_id, download_path):
+        return self._client.move_torrent_data(t_id, download_path)
+
+    async def force_reannounce(self, t_id):
+        return await asyncio.wrap_future(self._thread_pool.submit(self._force_reannounce, t_id))
+
+    async def force_recheck(self, t_id):
+        return await asyncio.wrap_future(self._thread_pool.submit(self._force_recheck, t_id))
+
+    async def move_data(self, t_id, download_path):
+        return await asyncio.wrap_future(self._thread_pool.submit(self._move_data, t_id, download_path))
+
     async def get_session_stats(self):
         return await asyncio.wrap_future(self._thread_pool.submit(self._get_session_stats))

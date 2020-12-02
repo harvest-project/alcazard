@@ -90,6 +90,36 @@ class AlcazarOrchestrator:
         logger.info('Created and started instance {}.'.format(instance.name))
         return instance
 
+    async def force_reannounce(self, realm=None, info_hash=''):
+        with (await asyncio.wait_for(self.op_lock, timeout=self.OP_TIMEOUT)):
+            logger.info('Force reannouncing torrent {} from realm {}', info_hash, realm)
+            if not all(m.initialized and m.session_stats for m in self.managers_by_realm[realm.id]):
+                raise NotInitializedException()
+            manager = self.realm_info_hash_manager[realm.id].get(info_hash)
+            if not manager:
+                raise TorrentNotFoundException()
+            await manager.force_reannounce(info_hash)
+
+    async def force_recheck(self, realm=None, info_hash=''):
+        with (await asyncio.wait_for(self.op_lock, timeout=self.OP_TIMEOUT)):
+            logger.info('Rechecking torrent {} from realm {}', info_hash, realm)
+            if not all(m.initialized and m.session_stats for m in self.managers_by_realm[realm.id]):
+                raise NotInitializedException()
+            manager = self.realm_info_hash_manager[realm.id].get(info_hash)
+            if not manager:
+                raise TorrentNotFoundException()
+            await manager.recheck_data(info_hash)
+
+    async def move_data(self, realm=None, info_hash='', download_path=None):
+        with (await asyncio.wait_for(self.op_lock, timeout=self.OP_TIMEOUT)):
+            logger.info('Moving torrent {} from realm {} to {}', info_hash, realm, download_path)
+            if not all(m.initialized and m.session_stats for m in self.managers_by_realm[realm.id]):
+                raise NotInitializedException()
+            manager = self.realm_info_hash_manager[realm.id].get(info_hash)
+            if not manager:
+                raise TorrentNotFoundException()
+            await manager.move_data(info_hash, download_path)
+
     async def add_torrent(self, realm, torrent_file, download_path, name):
         with (await asyncio.wait_for(self.op_lock, timeout=self.OP_TIMEOUT)):
             logger.info('Adding torrent to realm {}', realm)

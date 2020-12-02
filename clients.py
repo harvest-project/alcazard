@@ -218,6 +218,18 @@ class Manager(ABC):
         pass
 
     @abstractmethod
+    async def force_reannounce(self, torrent):
+        pass
+
+    @abstractmethod
+    async def force_recheck(self, torrent):
+        pass
+
+    @abstractmethod
+    async def move_data(self, torrent, download_path):
+        pass
+
+    @abstractmethod
     def launch(self):
         logger.info('Launching {}', self._name)
         self._launch_datetime = timezone_now()
