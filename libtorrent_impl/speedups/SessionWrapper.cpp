@@ -186,6 +186,54 @@ void SessionWrapper::init_add_params(lt::add_torrent_params &params, std::string
     }
 }
 
+void SessionWrapper::force_recheck(std::string info_hash_str){
+    logger.debug("Called force_recheck for %s", info_hash_str.c_str());
+    if (info_hash_str.size() != lt::sha1_hash::size * 2) {
+        throw std::runtime_error("Bad info_hash parameter.");
+    }
+    char buf[lt::sha1_hash::size];
+    if (!lt::from_hex(info_hash_str.c_str(), info_hash_str.size(), buf)) {
+        throw std::runtime_error("Error decoding hex str");
+    }
+    auto state_item = this->torrent_states.find(std::string(buf, lt::sha1_hash::size));
+    if (state_item == this->torrent_states.end()) {
+        throw std::runtime_error("Torrent not found.");
+    }
+    state_item->second->handle.force_recheck();
+}
+
+void SessionWrapper::force_reannounce(std::string info_hash_str){
+    logger.debug("Called force_reannounce for %s", info_hash_str.c_str());
+    if (info_hash_str.size() != lt::sha1_hash::size * 2) {
+        throw std::runtime_error("Bad info_hash parameter.");
+    }
+    char buf[lt::sha1_hash::size];
+    if (!lt::from_hex(info_hash_str.c_str(), info_hash_str.size(), buf)) {
+        throw std::runtime_error("Error decoding hex str");
+    }
+    auto state_item = this->torrent_states.find(std::string(buf, lt::sha1_hash::size));
+    if (state_item == this->torrent_states.end()) {
+        throw std::runtime_error("Torrent not found.");
+    }
+    state_item->second->handle.force_reannounce();
+}
+
+void SessionWrapper::move_data(std::string info_hash_str, std::string download_path){
+    logger.debug("Called move_data for %s to %s", info_hash_str.c_str(), download_path.c_str());
+    if (info_hash_str.size() != lt::sha1_hash::size * 2) {
+        throw std::runtime_error("Bad info_hash parameter.");
+    }
+    char buf[lt::sha1_hash::size];
+    if (!lt::from_hex(info_hash_str.c_str(), info_hash_str.size(), buf)) {
+        throw std::runtime_error("Error decoding hex str");
+    }
+    auto state_item = this->torrent_states.find(std::string(buf, lt::sha1_hash::size));
+    if (state_item == this->torrent_states.end()) {
+        throw std::runtime_error("Torrent not found.");
+    }
+    //state_item->second->handle.move_storage(download_path);
+}
+
 std::shared_ptr <TorrentState> SessionWrapper::add_torrent(
         std::string torrent_file,
         std::string download_path,

@@ -30,6 +30,9 @@ class AlcazarAPI:
             web.delete('/torrents/{realm_name}/{info_hash}', self.delete_torrent),
             web.post('/pop_update_batch', self.post_pop_update_batch),
             web.get('/torrents/force_recheck/{realm_name}/{info_hash}', self.force_recheck),
+            web.get('/torrents/pause_torrent/{realm_name}/{info_hash}', self.pause_torrent),
+            web.get('/torrents/resume_torrent/{realm_name}/{info_hash}', self.resume_torrent),
+            web.post('/torrents/rename_torrent/{realm_name}/{info_hash}', self.rename_torrent),
             web.get('/torrents/force_reannounce/{realm_name}/{info_hash}', self.force_reannounce),
             web.post('/torrents/move_data/{realm_name}/{info_hash}', self.move_data),
         ])
@@ -143,6 +146,59 @@ class AlcazarAPI:
         return JsonResponse(realm_batches)
 
     @jsonify_exceptions
+    async def pause_torrent(self, request):
+        realm = Realm.select().where(Realm.name == request.match_info['realm_name']).first()
+        if not realm:
+            return JsonResponse({'detail': 'Realm does not exist. Create it by adding a client to it.'}, status=400)
+
+        try:
+            await self.orchestrator.pause_torrent(
+                realm=realm,
+                info_hash=request.match_info['info_hash']
+            )
+            return JsonResponse({})
+        except TorrentNotFoundException:
+            return JsonResponse({'detail': 'Torrent not found.'}, status=404)
+        except asyncio.TimeoutError:
+            return JsonResponse({'detail': 'Alcazar is busy performing another action. Try again later.'}, status=503)
+
+    @jsonify_exceptions
+    async def resume_torrent(self, request):
+        realm = Realm.select().where(Realm.name == request.match_info['realm_name']).first()
+        if not realm:
+            return JsonResponse({'detail': 'Realm does not exist. Create it by adding a client to it.'}, status=400)
+
+        try:
+            await self.orchestrator.resume_torrent(
+                realm=realm,
+                info_hash=request.match_info['info_hash']
+            )
+            return JsonResponse({})
+        except TorrentNotFoundException:
+            return JsonResponse({'detail': 'Torrent not found.'}, status=404)
+        except asyncio.TimeoutError:
+            return JsonResponse({'detail': 'Alcazar is busy performing another action. Try again later.'}, status=503)
+
+    @jsonify_exceptions
+    async def rename_torrent(self, request):
+        data = await request.json()
+        realm = Realm.select().where(Realm.name == request.match_info['realm_name']).first()
+        if not realm:
+            return JsonResponse({'detail': 'Realm does not exist. Create it by adding a client to it.'}, status=400)
+
+        try:
+            await self.orchestrator.rename_torrent(
+                realm=realm,
+                info_hash=request.match_info['info_hash'],
+                name=data['name']
+            )
+            return JsonResponse({})
+        except TorrentNotFoundException:
+            return JsonResponse({'detail': 'Torrent not found.'}, status=404)
+        except asyncio.TimeoutError:
+            return JsonResponse({'detail': 'Alcazar is busy performing another action. Try again later.'}, status=503)
+    
+    @jsonify_exceptions
     async def force_reannounce(self, request):
         realm = Realm.select().where(Realm.name == request.match_info['realm_name']).first()
         if not realm:
@@ -178,6 +234,7 @@ class AlcazarAPI:
     
     @jsonify_exceptions
     async def move_data(self, request):
+        data = await request.json()
         realm = Realm.select().where(Realm.name == request.match_info['realm_name']).first()
         if not realm:
             return JsonResponse({'detail': 'Realm does not exist. Create it by adding a client to it.'}, status=400)
@@ -186,7 +243,7 @@ class AlcazarAPI:
             await self.orchestrator.move_data(
                 realm=realm,
                 info_hash=request.match_info['info_hash'],
-                download_path=request.match_info['download_path']
+                download_path=data['download_path']
             )
             return JsonResponse({})
         except TorrentNotFoundException:

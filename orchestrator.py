@@ -90,7 +90,7 @@ class AlcazarOrchestrator:
         logger.info('Created and started instance {}.'.format(instance.name))
         return instance
 
-    async def force_reannounce(self, realm=None, info_hash=''):
+    async def force_reannounce(self, realm, info_hash):
         with (await asyncio.wait_for(self.op_lock, timeout=self.OP_TIMEOUT)):
             logger.info('Force reannouncing torrent {} from realm {}', info_hash, realm)
             if not all(m.initialized and m.session_stats for m in self.managers_by_realm[realm.id]):
@@ -100,7 +100,7 @@ class AlcazarOrchestrator:
                 raise TorrentNotFoundException()
             await manager.force_reannounce(info_hash)
 
-    async def force_recheck(self, realm=None, info_hash=''):
+    async def force_recheck(self, realm, info_hash):
         with (await asyncio.wait_for(self.op_lock, timeout=self.OP_TIMEOUT)):
             logger.info('Rechecking torrent {} from realm {}', info_hash, realm)
             if not all(m.initialized and m.session_stats for m in self.managers_by_realm[realm.id]):
@@ -108,9 +108,9 @@ class AlcazarOrchestrator:
             manager = self.realm_info_hash_manager[realm.id].get(info_hash)
             if not manager:
                 raise TorrentNotFoundException()
-            await manager.recheck_data(info_hash)
+            await manager.force_recheck(info_hash)
 
-    async def move_data(self, realm=None, info_hash='', download_path=None):
+    async def move_data(self, realm, info_hash, download_path):
         with (await asyncio.wait_for(self.op_lock, timeout=self.OP_TIMEOUT)):
             logger.info('Moving torrent {} from realm {} to {}', info_hash, realm, download_path)
             if not all(m.initialized and m.session_stats for m in self.managers_by_realm[realm.id]):
@@ -142,6 +142,36 @@ class AlcazarOrchestrator:
             if not manager:
                 raise TorrentNotFoundException()
             await manager.remove_torrent(info_hash)
+
+    async def pause_torrent(self, realm, info_hash):
+        with (await asyncio.wait_for(self.op_lock, timeout=self.OP_TIMEOUT)):
+            logger.info('Pausing torrent {} from realm {}', info_hash, realm)
+            if not all(m.initialized and m.session_stats for m in self.managers_by_realm[realm.id]):
+                raise NotInitializedException()
+            manager = self.realm_info_hash_manager[realm.id].get(info_hash)
+            if not manager:
+                raise TorrentNotFoundException()
+            await manager.pause_torrent(info_hash)
+
+    async def resume_torrent(self, realm, info_hash):
+        with (await asyncio.wait_for(self.op_lock, timeout=self.OP_TIMEOUT)):
+            logger.info('Resuming torrent {} from realm {}', info_hash, realm)
+            if not all(m.initialized and m.session_stats for m in self.managers_by_realm[realm.id]):
+                raise NotInitializedException()
+            manager = self.realm_info_hash_manager[realm.id].get(info_hash)
+            if not manager:
+                raise TorrentNotFoundException()
+            await manager.resume_torrent(info_hash)
+
+    async def rename_torrent(self, realm, info_hash, name):
+        with (await asyncio.wait_for(self.op_lock, timeout=self.OP_TIMEOUT)):
+            logger.info('Renaming torrent {} from realm {} to {}', info_hash, realm, name)
+            if not all(m.initialized and m.session_stats for m in self.managers_by_realm[realm.id]):
+                raise NotInitializedException()
+            manager = self.realm_info_hash_manager[realm.id].get(info_hash)
+            if not manager:
+                raise TorrentNotFoundException()
+            await manager.rename_torrent(info_hash, name)
 
     def on_torrent_batch_update(self, manager, batch):
         logger.debug('Orchestrator received batch update with {} adds, {} updates and {} deletes'.format(

@@ -2,7 +2,7 @@
 #include <ctime>
 #include <sys/time.h>
 #include <memory>
-
+#include <stdexcept>
 #include "Utils.hpp"
 
 Logger::Level Logger::level = Logger::WARNING;

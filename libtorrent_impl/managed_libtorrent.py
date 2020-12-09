@@ -213,6 +213,25 @@ class ManagedLibtorrent(Manager):
         batch.added[data['info_hash']] = data
         self._orchestrator.on_torrent_batch_update(self, batch)
         return data
+    
+    async def force_reannounce(self, info_hash):
+        await self._exec(self._session.force_reannounce, info_hash)
+
+    async def force_recheck(self, info_hash):
+        await self._exec(self._session.force_recheck, info_hash)
+
+    async def move_data(self, info_hash, download_path):
+        raise NotImplementedError()
+        await self._exec(self._session.move_data, info_hash, download_path)
+
+    async def pause_torrent(self, info_hash):
+        raise NotImplementedError()
+
+    async def resume_torrent(self, info_hash):
+        raise NotImplementedError()
+
+    async def rename_torrent(self, info_hash, name):
+        raise NotImplementedError()
 
     async def remove_torrent(self, info_hash):
         await self._exec(self._session.remove_torrent, info_hash)

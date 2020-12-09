@@ -110,6 +110,9 @@ public:
             std::string *name
     );
     void remove_torrent(std::string info_hash);
+    void force_recheck(std::string info_hash);
+    void force_reannounce(std::string info_hash);
+    void move_data(std::string info_hash, std::string download_path);
     void post_torrent_updates();
     void pause();
     BatchTorrentUpdate process_alerts(bool shutting_down);

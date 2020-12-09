@@ -202,7 +202,7 @@ class BaseTransmission(Manager):
 
         logger.info('Rechecking torrent {} from {}', info_hash, self._name)
         torrent_state = self._torrent_states[info_hash]
-        await self._executor.recheck_data(torrent_state.transmission_id)
+        await self._executor.force_recheck(torrent_state.transmission_id)
 
     async def move_data(self, info_hash, download_path):
         if not self._initialized:
@@ -213,7 +213,48 @@ class BaseTransmission(Manager):
 
         logger.info('Moving torrent {} from {} to {}', info_hash, self._name, download_path)
         torrent_state = self._torrent_states[info_hash]
-        raise NotImplementedError()
+        t_torrent = await self._executor.move_data(torrent_state.transmission_id, download_path)
+        batch = TorrentBatchUpdate()
+        torrent_data = self._register_t_torrent_update(batch, t_torrent)
+        self._orchestrator.on_torrent_batch_update(self, batch)
+        return torrent_data.to_dict()
+
+    async def pause_torrent(self, info_hash):
+        if not self._initialized:
+            message = 'Unable to pause torrent {} from {}: not fully started up yet.'.format(
+                info_hash, self._name)
+            logger.error(message)
+            raise Exception(message)
+
+        logger.info('Pausing torrent {} from {}', info_hash, self._name)
+        torrent_state = self._torrent_states[info_hash]
+        await self._executor.pause_torrent(torrent_state.transmission_id)
+
+    async def resume_torrent(self, info_hash):
+        if not self._initialized:
+            message = 'Unable to resume torrent {} from {}: not fully started up yet.'.format(
+                info_hash, self._name)
+            logger.error(message)
+            raise Exception(message)
+
+        logger.info('Resuming torrent {} from {}', info_hash, self._name)
+        torrent_state = self._torrent_states[info_hash]
+        await self._executor.resume_torrent(torrent_state.transmission_id)
+
+    async def rename_torrent(self, info_hash, name):
+        if not self._initialized:
+            message = 'Unable to rename torrent {} from {} to {}: not fully started up yet.'.format(
+                info_hash, self._name, name)
+            logger.error(message)
+            raise Exception(message)
+
+        logger.info('Renaming torrent {} from {} to {}', info_hash, self._name, name)
+        torrent_state = self._torrent_states[info_hash]
+        t_torrent = await self._executor.rename_torrent(torrent_state.transmission_id, name)
+        batch = TorrentBatchUpdate()
+        torrent_data = self._register_t_torrent_update(batch, t_torrent)
+        self._orchestrator.on_torrent_batch_update(self, batch)
+        return torrent_data.to_dict()
 
     async def get_session_stats(self):
         return self._session_stats

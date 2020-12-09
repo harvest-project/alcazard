@@ -218,15 +218,27 @@ class Manager(ABC):
         pass
 
     @abstractmethod
-    async def force_reannounce(self, torrent):
+    async def force_reannounce(self, info_hash):
         pass
 
     @abstractmethod
-    async def force_recheck(self, torrent):
+    async def force_recheck(self, info_hash):
         pass
 
     @abstractmethod
-    async def move_data(self, torrent, download_path):
+    async def move_data(self, info_hash, download_path):
+        pass
+
+    @abstractmethod
+    async def pause_torrent(self, info_hash):
+        pass
+
+    @abstractmethod
+    async def resume_torrent(self, info_hash):
+        pass
+
+    @abstractmethod
+    async def rename_torrent(self, info_hash, name):
         pass
 
     @abstractmethod

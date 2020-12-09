@@ -80,6 +80,8 @@ cdef extern from "SessionWrapper.hpp":
         int load_initial_torrents() nogil except +
         shared_ptr[TorrentState] add_torrent(string torrent_file, string download_path, string *name) nogil except +
         void remove_torrent(string info_hash) nogil except +
+        void force_recheck(string info_hash) nogil except +
+        void force_reannounce(string info_hash) nogil except +
         void post_torrent_updates() nogil except +
         void pause() nogil except +
         int listen_port() nogil except +
@@ -264,6 +266,17 @@ cdef class LibtorrentSession:
             )
 
         return self.torrent_state_to_dict(result)
+
+    def force_reannounce(self, str info_hash):
+        pass
+    
+    def force_recheck(self, str info_hash):
+        cdef:
+            string c_info_hash = info_hash.encode()
+        self.wrapper.force_recheck(c_info_hash)
+    
+    def move_data(self, str info_hash, str download_path):
+        pass
 
     def remove_torrent(self, str info_hash):
         cdef:
