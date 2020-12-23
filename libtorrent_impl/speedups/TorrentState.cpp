@@ -66,6 +66,11 @@ bool TorrentState::update_from_status(lt::torrent_status *status) {
     bool updated = false;
     this->state = status->state;
     UPDATE_STATE(this->status, get_alcazar_status(status->state));
+    // Status must be stopped since it is paused
+    // Alternative 'cleaner' solution would be to add a paused attribute and update that
+    if (status->paused) {
+        UPDATE_STATE(this->status, STATUS_STOPPED);
+    }
     UPDATE_STATE(this->size, status->total_wanted);
     UPDATE_STATE(this->downloaded, status->all_time_download);
     UPDATE_STATE(this->uploaded, status->all_time_upload);
@@ -75,6 +80,18 @@ bool TorrentState::update_from_status(lt::torrent_status *status) {
     UPDATE_STATE(this->progress, status->progress);
     UPDATE_STATE(this->error, status->error);
     UPDATE_STATE(this->date_added, status->added_time);
+    return updated;
+}
+
+bool TorrentState::update_file_name(std::string name) {
+    bool updated = false;
+    UPDATE_STATE(this->name, name);
+    return updated;
+}
+
+bool TorrentState::update_download_path(std::string download_path) {
+    bool updated = false;
+    UPDATE_STATE(this->download_path, download_path);
     return updated;
 }
 
@@ -93,6 +110,11 @@ bool TorrentState::update_tracker_reply() {
 
 bool TorrentState::update_tracker_error(lt::tracker_error_alert *alert) {
     bool updated = false;
+    // When pausing, there is a connection lost alert
+    // This should be suppressed so the client shows paused instead of stopped with error
+    if (this->handle.status().paused) {
+        return false;   
+    }
     UPDATE_STATE(this->tracker_status, TRACKER_STATUS_ERROR);
     UPDATE_STATE(this->tracker_error, format_tracker_error(alert));
     return updated;

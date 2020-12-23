@@ -45,7 +45,8 @@ void SessionWrapper::init_settings_pack(lt::settings_pack *pack) {
     const int alert_mask =
             lt::alert::error_notification
             | lt::alert::tracker_notification
-            | lt::alert::status_notification;
+            | lt::alert::status_notification
+            | lt::alert::storage_notification;
     // Basic settings
     pack->set_int(lt::settings_pack::alert_mask, alert_mask);
     pack->set_str(lt::settings_pack::user_agent, "Deluge/1.2.15");
@@ -202,8 +203,8 @@ void SessionWrapper::force_recheck(std::string info_hash_str){
     state_item->second->handle.force_recheck();
 }
 
-void SessionWrapper::force_reannounce(std::string info_hash_str){
-    logger.debug("Called force_reannounce for %s", info_hash_str.c_str());
+std::shared_ptr <TorrentState> SessionWrapper::pause_torrent(std::string info_hash_str){
+    logger.debug("Called pause_torrent for %s", info_hash_str.c_str());
     if (info_hash_str.size() != lt::sha1_hash::size * 2) {
         throw std::runtime_error("Bad info_hash parameter.");
     }
@@ -215,7 +216,42 @@ void SessionWrapper::force_reannounce(std::string info_hash_str){
     if (state_item == this->torrent_states.end()) {
         throw std::runtime_error("Torrent not found.");
     }
-    state_item->second->handle.force_reannounce();
+    state_item->second->handle.pause();
+    lt::torrent_status status = state_item->second->handle.status();
+    state_item->second->update_from_status(&status);
+    return state_item->second;
+}
+
+void SessionWrapper::resume_torrent(std::string info_hash_str){
+    logger.debug("Called resume_torrent for %s", info_hash_str.c_str());
+    if (info_hash_str.size() != lt::sha1_hash::size * 2) {
+        throw std::runtime_error("Bad info_hash parameter.");
+    }
+    char buf[lt::sha1_hash::size];
+    if (!lt::from_hex(info_hash_str.c_str(), info_hash_str.size(), buf)) {
+        throw std::runtime_error("Error decoding hex str");
+    }
+    auto state_item = this->torrent_states.find(std::string(buf, lt::sha1_hash::size));
+    if (state_item == this->torrent_states.end()) {
+        throw std::runtime_error("Torrent not found.");
+    }
+    state_item->second->handle.resume();
+}
+
+void SessionWrapper::rename_torrent(std::string info_hash_str, std::string name){
+    logger.debug("Called rename_torrent for %s to %s", info_hash_str.c_str(), name.c_str());
+    if (info_hash_str.size() != lt::sha1_hash::size * 2) {
+        throw std::runtime_error("Bad info_hash parameter.");
+    }
+    char buf[lt::sha1_hash::size];
+    if (!lt::from_hex(info_hash_str.c_str(), info_hash_str.size(), buf)) {
+        throw std::runtime_error("Error decoding hex str");
+    }
+    auto state_item = this->torrent_states.find(std::string(buf, lt::sha1_hash::size));
+    if (state_item == this->torrent_states.end()) {
+        throw std::runtime_error("Torrent not found.");
+    }
+    state_item->second->handle.rename_file(0, name);
 }
 
 void SessionWrapper::move_data(std::string info_hash_str, std::string download_path){
@@ -231,7 +267,23 @@ void SessionWrapper::move_data(std::string info_hash_str, std::string download_p
     if (state_item == this->torrent_states.end()) {
         throw std::runtime_error("Torrent not found.");
     }
-    //state_item->second->handle.move_storage(download_path);
+    state_item->second->handle.move_storage(download_path);
+}
+
+void SessionWrapper::force_reannounce(std::string info_hash_str){
+    logger.debug("Called force_reannounce for %s", info_hash_str.c_str());
+    if (info_hash_str.size() != lt::sha1_hash::size * 2) {
+        throw std::runtime_error("Bad info_hash parameter.");
+    }
+    char buf[lt::sha1_hash::size];
+    if (!lt::from_hex(info_hash_str.c_str(), info_hash_str.size(), buf)) {
+        throw std::runtime_error("Error decoding hex str");
+    }
+    auto state_item = this->torrent_states.find(std::string(buf, lt::sha1_hash::size));
+    if (state_item == this->torrent_states.end()) {
+        throw std::runtime_error("Torrent not found.");
+    }
+    state_item->second->handle.force_reannounce();
 }
 
 std::shared_ptr <TorrentState> SessionWrapper::add_torrent(
@@ -363,6 +415,14 @@ void SessionWrapper::all_torrents_save_resume_data(bool flush_cache) {
     }
 }
 
+void SessionWrapper::on_alert_file_renamed(BatchTorrentUpdate *update, lt::file_renamed_alert *alert){
+    auto info_hash = alert->handle.info_hash().to_string();
+    logger.info("Received name updates for %s.", lt::to_hex(info_hash).c_str());
+    auto state_item = this->torrent_states.find(info_hash);
+    state_item->second->update_file_name(alert->new_name());
+    update->updated.push_back(state_item->second);
+}
+
 void SessionWrapper::on_alert_add_torrent(BatchTorrentUpdate *update, lt::add_torrent_alert *alert) {
     if (alert->error) {
         // TODO: Describe the actual error
@@ -389,6 +449,14 @@ void SessionWrapper::on_alert_state_update(BatchTorrentUpdate *update, lt::state
             update->updated.push_back(state->second);
         }
     }
+}
+
+void SessionWrapper::on_alert_storage_moved(BatchTorrentUpdate *update, lt::storage_moved_alert *alert) {
+    auto info_hash = alert->handle.info_hash().to_string();
+    logger.info("Received download path updates for %s.", lt::to_hex(info_hash).c_str());
+    auto state_item = this->torrent_states.find(info_hash);
+    state_item->second->update_download_path(alert->storage_path());
+    update->updated.push_back(state_item->second);
 }
 
 void SessionWrapper::apply_pre_load_tracker_state(std::shared_ptr <TorrentState> state) {

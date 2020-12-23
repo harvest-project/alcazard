@@ -55,6 +55,8 @@ private:
     void on_alert_torrent_removed(BatchTorrentUpdate *update, lt::torrent_removed_alert *alert);
     void on_alert_listen_succeeded(BatchTorrentUpdate *update, lt::listen_succeeded_alert *alert);
     void on_alert_listen_failed(BatchTorrentUpdate *update, lt::listen_failed_alert *alert);
+    void on_alert_storage_moved(BatchTorrentUpdate *update, lt::storage_moved_alert *alert);
+    void on_alert_file_renamed(BatchTorrentUpdate *update, lt::file_renamed_alert *alert);
 
     inline void dispatch_alert(BatchTorrentUpdate *update, lt::alert *alert) {
         if (auto a = lt::alert_cast<lt::add_torrent_alert>(alert)) {
@@ -81,6 +83,10 @@ private:
             this->on_alert_listen_succeeded(update, a);
         } else if (auto a = lt::alert_cast<lt::listen_failed_alert>(alert)) {
             this->on_alert_listen_failed(update, a);
+        } else if (auto a = lt::alert_cast<lt::storage_moved_alert>(alert)) {
+            this->on_alert_storage_moved(update, a);
+        } else if (auto a = lt::alert_cast<lt::file_renamed_alert>(alert)) {
+            this->on_alert_file_renamed(update, a);
         }
     }
 
@@ -111,6 +117,9 @@ public:
     );
     void remove_torrent(std::string info_hash);
     void force_recheck(std::string info_hash);
+    std::shared_ptr <TorrentState> pause_torrent(std::string info_hash);
+    void resume_torrent(std::string info_hash);
+    void rename_torrent(std::string info_hash, std::string name);
     void force_reannounce(std::string info_hash);
     void move_data(std::string info_hash, std::string download_path);
     void post_torrent_updates();
