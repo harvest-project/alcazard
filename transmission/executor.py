@@ -98,5 +98,52 @@ class TransmissionAsyncExecutor:
         logger.debug('Get session stats')
         return self._client.session_stats()
 
+    def _force_recheck(self, t_id):
+        return self._client.verify_torrent(t_id)
+
+    def _force_reannounce(self, t_id):
+        return self._client.reannounce_torrent(t_id)
+
+    def _move_data(self, t_id, download_path):
+        logger.debug('Moving torrent {} to {} from {}:{}', t_id, download_path, self._host, self._port)
+        self._client.move_torrent_data(t_id, download_path)
+        return self._client.get_torrent(t_id, arguments=TRANSMISSION_FETCH_ARGS)
+    
+    def _pause_torrent(self, t_id):
+        logger.debug('Pausing torrent {} from {}:{}', t_id, self._host, self._port)
+        return self._client.stop_torrent(t_id)
+
+    def _resume_torrent(self, t_id):
+        logger.debug('Resuming torrent {} from {}:{}', t_id, self._host, self._port)
+        return self._client.start_torrent(t_id)
+
+    def _rename_torrent(self, t_id, name):
+        logger.debug('Renaming torrent {} to {} from {}:{}', t_id, name, self._host, self._port)
+        torrent = self._client.get_torrent(t_id, arguments=TRANSMISSION_FETCH_ARGS)
+        self._client.rename_torrent_path(
+            t_id,
+            torrent.name,
+            name
+        )
+        return self._client.get_torrent(t_id, arguments=TRANSMISSION_FETCH_ARGS)
+
+    async def pause_torrent(self, t_id):
+        return await asyncio.wrap_future(self._thread_pool.submit(self._pause_torrent, t_id))
+
+    async def resume_torrent(self, t_id):
+        return await asyncio.wrap_future(self._thread_pool.submit(self._resume_torrent, t_id))
+    
+    async def rename_torrent(self, t_id, name):
+        return await asyncio.wrap_future(self._thread_pool.submit(self._rename_torrent, t_id, name))
+
+    async def force_reannounce(self, t_id):
+        return await asyncio.wrap_future(self._thread_pool.submit(self._force_reannounce, t_id))
+
+    async def force_recheck(self, t_id):
+        return await asyncio.wrap_future(self._thread_pool.submit(self._force_recheck, t_id))
+
+    async def move_data(self, t_id, download_path):
+        return await asyncio.wrap_future(self._thread_pool.submit(self._move_data, t_id, download_path))
+
     async def get_session_stats(self):
         return await asyncio.wrap_future(self._thread_pool.submit(self._get_session_stats))

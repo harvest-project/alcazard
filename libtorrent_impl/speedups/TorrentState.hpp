@@ -62,6 +62,8 @@ public:
     bool update_tracker_announce();
     bool update_tracker_reply();
     bool update_tracker_error(lt::tracker_error_alert *alert);
+    bool update_file_name(std::string name);
+    bool update_download_path(std::string download_path);
 };
 
 class BatchTorrentUpdate {

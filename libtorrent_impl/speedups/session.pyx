@@ -80,6 +80,12 @@ cdef extern from "SessionWrapper.hpp":
         int load_initial_torrents() nogil except +
         shared_ptr[TorrentState] add_torrent(string torrent_file, string download_path, string *name) nogil except +
         void remove_torrent(string info_hash) nogil except +
+        void force_recheck(string info_hash) nogil except +
+        void force_reannounce(string info_hash) nogil except +
+        shared_ptr[TorrentState] pause_torrent(string info_hash) nogil except +
+        void resume_torrent(string info_hash) nogil except +
+        void rename_torrent(string info_hash, string name) nogil except +
+        void move_data(string info_hash, string download_path) nogil except +
         void post_torrent_updates() nogil except +
         void pause() nogil except +
         int listen_port() nogil except +
@@ -265,6 +271,25 @@ cdef class LibtorrentSession:
 
         return self.torrent_state_to_dict(result)
 
+    def force_reannounce(self, str info_hash):
+        cdef:
+            string c_info_hash = info_hash.encode()
+        with nogil:
+            self.wrapper.force_reannounce(c_info_hash)
+    
+    def force_recheck(self, str info_hash):
+        cdef:
+            string c_info_hash = info_hash.encode()
+        with nogil:
+            self.wrapper.force_recheck(c_info_hash)
+    
+    def move_data(self, str info_hash, str download_path):
+        cdef:
+            string c_info_hash = info_hash.encode()
+            string c_download_path = download_path.encode()
+        with nogil:
+            self.wrapper.move_data(c_info_hash, c_download_path)
+
     def remove_torrent(self, str info_hash):
         cdef:
             string c_info_hash = info_hash.encode()
@@ -278,6 +303,28 @@ cdef class LibtorrentSession:
     def status(self):
         pass
 
+    def pause_torrent(self, str info_hash):
+        cdef:
+            string c_info_hash = info_hash.encode()
+            shared_ptr[TorrentState] result
+        with nogil:
+            result = self.wrapper.pause_torrent(c_info_hash)
+        return self.torrent_state_to_dict(result)
+
+    def resume_torrent(self, str info_hash):
+        cdef:
+            string c_info_hash = info_hash.encode()
+            shared_ptr[TorrentState] result
+        with nogil:
+            self.wrapper.resume_torrent(c_info_hash)
+
+    def rename_torrent(self, str info_hash, str name):
+        cdef:
+            string c_info_hash = info_hash.encode()
+            string c_name = name.encode()
+        with nogil:
+            self.wrapper.rename_torrent(c_info_hash, c_name)
+    
     def load_initial_torrents(self):
         cdef int64_t result
         with nogil:
