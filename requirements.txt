@@ -1,4 +1,4 @@
-aiohttp==3.6.2
+aiohttp==3.7.4
 Jinja2==2.11.2
 peewee==3.13.3
 transmissionrpc==0.11
