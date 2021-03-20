@@ -1,5 +1,5 @@
 aiohttp==3.6.2
-Jinja2==2.11.2
+Jinja2==2.11.3
 peewee==3.13.3
 transmissionrpc==0.11
 pytz==2020.1
